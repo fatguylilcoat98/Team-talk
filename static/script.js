@@ -305,6 +305,9 @@ saveSettingsBtn.addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
+        if (res.status === 404) {
+            throw new Error('server is running old code — run: sudo systemctl restart team-talk');
+        }
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `Save failed (${res.status})`);
         applySettingsSnapshot(data);
@@ -335,6 +338,13 @@ testKeysBtn.addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
+        if (res.status === 404) {
+            throw new Error('server is running old code — run: sudo systemctl restart team-talk');
+        }
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `request failed (${res.status})`);
+        }
         const data = await res.json();
         testClaude.textContent = `Claude: ${data.claude.ok ? '✓' : '✗'} ${data.claude.detail}`;
         testClaude.className = `test-line ${data.claude.ok ? 'ok' : 'fail'}`;
