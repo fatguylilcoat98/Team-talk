@@ -34,6 +34,20 @@ app = FastAPI(title="Team Talk")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# Read once at startup. Static files are served fresh from disk, so after a
+# `git pull` without a restart the page's copy of version.txt is newer than
+# this in-memory value — the frontend compares the two and shows a banner.
+try:
+    with open(os.path.join(STATIC_DIR, "version.txt"), "r", encoding="utf-8") as _vf:
+        APP_VERSION = _vf.read().strip()
+except OSError:
+    APP_VERSION = "0"
+
+
+@app.get("/api/version")
+async def version():
+    return {"version": APP_VERSION}
+
 
 class ChatRequest(BaseModel):
     message: str

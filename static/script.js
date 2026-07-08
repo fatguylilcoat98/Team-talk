@@ -175,7 +175,22 @@ function appendRoundToHistory(round) {
     historyDiv.appendChild(buildRound(round));
 }
 
+function normalizeRound(round) {
+    // Resilience against an old backend: map the legacy two-AI shape
+    if (!round.responses && round.claude_response !== undefined) {
+        return {
+            ...round,
+            responses: [
+                { id: 'claude', name: 'Claude', color: '#d97757', text: round.claude_response, tokens: round.claude_tokens },
+                { id: 'chatgpt', name: 'ChatGPT', color: '#4bb388', text: round.chatgpt_response, tokens: round.chatgpt_tokens },
+            ],
+        };
+    }
+    return round;
+}
+
 function buildRound(round, pending = false) {
+    round = normalizeRound(round);
     const roundEl = document.createElement('div');
     roundEl.className = 'round';
 
@@ -539,9 +554,36 @@ resetSettingsBtn.addEventListener('click', async () => {
     }
 });
 
+// --- Stale-server detection ------------------------------------------------
+// Static files come fresh from disk; the API's version is loaded at process
+// start. If they differ (or /api/version doesn't exist), the server process
+// is older than the page — tell Chris to restart instead of failing weirdly.
+
+async function checkServerVersion() {
+    const banner = document.getElementById('stale-banner');
+    try {
+        const [pageRes, apiRes] = await Promise.all([
+            fetch(`/static/version.txt?t=${Date.now()}`),
+            fetch('/api/version'),
+        ]);
+        const pageVersion = pageRes.ok ? (await pageRes.text()).trim() : null;
+        if (!apiRes.ok) {
+            banner.classList.remove('hidden');
+            return;
+        }
+        const apiVersion = (await apiRes.json()).version;
+        if (pageVersion && apiVersion !== pageVersion) {
+            banner.classList.remove('hidden');
+        }
+    } catch (err) {
+        // network hiccup — don't nag
+    }
+}
+
 // --- Init ----------------------------------------------------------------
 
 async function init() {
+    checkServerVersion();
     try {
         const res = await fetch('/api/settings');
         const data = await res.json();
