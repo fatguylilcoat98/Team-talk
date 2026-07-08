@@ -336,6 +336,17 @@ button.danger:hover {
     font-size: 0.76rem;
 }
 
+.advanced summary {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 4px 0;
+}
+
+.advanced[open] summary {
+    margin-bottom: 12px;
+}
+
 .test-results {
     display: flex;
     flex-direction: column;
