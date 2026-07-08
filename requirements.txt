@@ -1,0 +1,6 @@
+fastapi>=0.110,<1.0
+uvicorn>=0.29
+anthropic>=0.40.0
+openai>=1.30.0
+python-dotenv>=1.0.0
+aiofiles>=23.2.1

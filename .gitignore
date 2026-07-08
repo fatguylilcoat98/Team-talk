@@ -1,0 +1,11 @@
+# Secrets — never commit API keys
+.env
+
+# Saved conversations
+sessions/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
