@@ -82,6 +82,12 @@ sudo systemctl enable --now team-talk
 
 Check on it with `systemctl status team-talk`, and watch logs with `journalctl -u team-talk -f`.
 
+The `chown -R teamtalk` step above is what lets the service user write `config/settings.json` when you save keys from the Settings page. If you ever see "Could not write settings file" in the UI, re-run:
+
+```bash
+sudo chown -R teamtalk:teamtalk /opt/team-talk
+```
+
 ### Updating
 
 ```bash
@@ -101,6 +107,34 @@ sudo systemctl restart team-talk
 5. Continue the conversation — each AI sees the other's previous answers, so you can say things like:
    - "Claude, respond to ChatGPT's point about memory."
    - "You two debate this for a minute."
+
+## Settings (API keys in the browser)
+
+You don't need to edit `.env` over SSH — open **⚙ Settings** (top-right button) to manage everything from any device, including your phone.
+
+**What you can set:**
+
+- Anthropic API Key and OpenAI API Key
+- Claude Model and ChatGPT Model
+- Host and Port (take effect after a restart: `sudo systemctl restart team-talk`)
+
+**How keys are stored:**
+
+- Saved server-side to `config/settings.json` (owner-only permissions, `chmod 600`)
+- The file is gitignored — keys can never end up on GitHub
+- Full keys are **never shown again** after saving — the UI only displays masked values like `sk-ant-api03-••••••`
+- Load order: saved Settings first, then environment variables / `.env`. So a key saved in Settings overrides the one in `.env`.
+- Key changes apply immediately — no restart needed
+
+**Test Keys** checks each key against its API separately and shows ✓/✗ per provider — you can test keys you've just typed before saving.
+
+**How to reset keys:**
+
+- In the UI: Settings → **Reset Saved Settings** (deletes `config/settings.json`; the app falls back to `.env`)
+- Or on the server: `rm /opt/team-talk/config/settings.json`
+- To replace just one key, type the new key in Settings and save — blank fields are left unchanged
+
+> ⚠️ **Do not expose Team Talk publicly unless authentication is added.** Anyone who can open the page can read masked keys, change settings, and chat on your API bill. Keep it on your LAN or behind a VPN.
 
 ## Saving Sessions
 

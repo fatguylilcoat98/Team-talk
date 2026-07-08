@@ -1,5 +1,6 @@
 # Secrets — never commit API keys
 .env
+config/
 
 # Saved conversations
 sessions/
