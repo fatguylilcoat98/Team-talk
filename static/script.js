@@ -1,5 +1,6 @@
-// Team Talk frontend — sends Chris's message once, renders both AI
-// responses side-by-side, and manages saved sessions.
+// Team Talk frontend — sends Chris's message once, renders every AI's
+// response with its own color/name, and manages sessions, modes, and
+// the AI roster.
 
 const sessionSelect = document.getElementById('session-select');
 const exportBtn = document.getElementById('export-btn');
@@ -7,8 +8,12 @@ const deleteBtn = document.getElementById('delete-btn');
 const historyDiv = document.getElementById('history');
 const chrisInput = document.getElementById('chris-input');
 const sendBtn = document.getElementById('send-btn');
+const legendDiv = document.getElementById('legend');
+const modeSelect = document.getElementById('mode-select');
+const turnSelect = document.getElementById('turn-select');
 
 let currentSessionId = null;
+let participantsCache = [];  // [{id, name, color, ...}] from /api/settings
 
 // --- Session management -------------------------------------------------
 
@@ -45,7 +50,7 @@ async function loadSession(sessionId) {
 
 function startNewSession() {
     currentSessionId = null;
-    historyDiv.innerHTML = '<p class="empty-hint">Start a new conversation below — both AIs will answer at the same time.</p>';
+    historyDiv.innerHTML = '<p class="empty-hint">Start a new conversation below — every AI answers.</p>';
 }
 
 sessionSelect.addEventListener('change', () => {
@@ -90,6 +95,13 @@ deleteBtn.addEventListener('click', async () => {
     await refreshSessions();
 });
 
+// --- Mode / turn selectors (remembered on this device) --------------------
+
+modeSelect.value = localStorage.getItem('teamtalk-mode') || 'collab';
+turnSelect.value = localStorage.getItem('teamtalk-turns') || 'parallel';
+modeSelect.addEventListener('change', () => localStorage.setItem('teamtalk-mode', modeSelect.value));
+turnSelect.addEventListener('change', () => localStorage.setItem('teamtalk-turns', turnSelect.value));
+
 // --- Chat ----------------------------------------------------------------
 
 sendBtn.addEventListener('click', sendMessage);
@@ -103,11 +115,8 @@ async function sendMessage() {
 
     sendBtn.disabled = true;
 
-    // Show the round immediately: your bubble + two "typing..." bubbles
-    const pending = buildRound({
-        round: null,
-        chris_message: message,
-    }, true);
+    // Show the round immediately: your bubble + typing bubbles for every AI
+    const pending = buildRound({ round: null, chris_message: message }, true);
     removeEmptyHint();
     historyDiv.appendChild(pending);
     historyDiv.scrollTop = historyDiv.scrollHeight;
@@ -116,7 +125,12 @@ async function sendMessage() {
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: message, session_id: currentSessionId }),
+            body: JSON.stringify({
+                message: message,
+                session_id: currentSessionId,
+                mode: modeSelect.value,
+                turn_style: turnSelect.value,
+            }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -136,10 +150,10 @@ async function sendMessage() {
         pending.replaceWith(buildRound({
             round: null,
             chris_message: message,
-            claude_response: `Error: ${err.message}`,
-            claude_tokens: 0,
-            chatgpt_response: `Error: ${err.message}`,
-            chatgpt_tokens: 0,
+            responses: participantsCache.map((p) => ({
+                id: p.id, name: p.name, color: p.color,
+                text: `Error: ${err.message}`, tokens: 0,
+            })),
         }));
     } finally {
         sendBtn.disabled = false;
@@ -148,6 +162,8 @@ async function sendMessage() {
 }
 
 // --- Rendering -----------------------------------------------------------
+
+const MODE_LABELS = { debate: '⚔️ debate', ai_only: '🤖 AIs only' };
 
 function removeEmptyHint() {
     const hint = historyDiv.querySelector('.empty-hint');
@@ -166,7 +182,10 @@ function buildRound(round, pending = false) {
     if (round.round) {
         const marker = document.createElement('div');
         marker.className = 'round-marker';
-        marker.textContent = `Round ${round.round}`;
+        let label = `Round ${round.round}`;
+        if (MODE_LABELS[round.mode]) label += ` · ${MODE_LABELS[round.mode]}`;
+        if (round.turn_style === 'sequential') label += ' · 🔁';
+        marker.textContent = label;
         roundEl.appendChild(marker);
     }
 
@@ -175,7 +194,7 @@ function buildRound(round, pending = false) {
     chrisRow.className = 'chris-row';
     const chrisBubble = document.createElement('div');
     chrisBubble.className = 'bubble chris-bubble';
-    chrisBubble.appendChild(speakerEl('chris-dot', 'Chris'));
+    chrisBubble.appendChild(speakerEl('#e8b04b', 'Chris'));
     const chrisText = document.createElement('div');
     chrisText.className = 'bubble-text';
     chrisText.textContent = round.chris_message;
@@ -183,60 +202,94 @@ function buildRound(round, pending = false) {
     chrisRow.appendChild(chrisBubble);
     roundEl.appendChild(chrisRow);
 
-    // AI replies — left side, each clearly named
+    // AI replies — left side, each clearly named and colored
     const pair = document.createElement('div');
     pair.className = 'ai-pair';
     if (pending) {
-        pair.appendChild(typingBubble('claude', 'Claude'));
-        pair.appendChild(typingBubble('chatgpt', 'ChatGPT'));
+        const roster = participantsCache.length
+            ? participantsCache
+            : [{ id: 'ai1', name: 'AI', color: '#93a0b8' }];
+        for (const p of roster) pair.appendChild(typingBubble(p));
     } else {
-        pair.appendChild(aiBubble('claude', 'Claude', round.claude_response, round.claude_tokens));
-        pair.appendChild(aiBubble('chatgpt', 'ChatGPT', round.chatgpt_response, round.chatgpt_tokens));
+        for (const resp of round.responses || []) pair.appendChild(aiBubble(resp));
     }
     roundEl.appendChild(pair);
 
     return roundEl;
 }
 
-function speakerEl(dotClass, name) {
+function speakerEl(color, name) {
     const el = document.createElement('div');
     el.className = 'speaker';
+    el.style.color = color;
     const dot = document.createElement('span');
-    dot.className = `dot ${dotClass}`;
+    dot.className = 'dot';
+    dot.style.background = color;
     el.appendChild(dot);
     el.appendChild(document.createTextNode(name));
     return el;
 }
 
-function aiBubble(who, name, text, tokens) {
+function aiBubble(resp) {
     const el = document.createElement('div');
-    const isError = (text || '').startsWith('Error:');
-    el.className = `bubble ai-bubble ${who}${isError ? ' error-bubble' : ''}`;
-    el.appendChild(speakerEl(`${who}-dot`, name));
+    const isError = (resp.text || '').startsWith('Error:');
+    el.className = `bubble ai-bubble${isError ? ' error-bubble' : ''}`;
+    const color = resp.color || '#93a0b8';
+    el.style.borderColor = hexWithAlpha(color, 0.55);
+    el.style.background = hexWithAlpha(color, 0.09);
+    el.appendChild(speakerEl(color, resp.name));
 
     const body = document.createElement('div');
     body.className = 'bubble-text';
-    body.textContent = text || '';
+    body.textContent = resp.text || '';
     el.appendChild(body);
 
-    if (tokens !== undefined && !isError) {
+    if (resp.tokens !== undefined && !isError) {
         const t = document.createElement('span');
         t.className = 'tokens-inline';
-        t.textContent = `tokens: ${tokens}`;
+        t.textContent = `tokens: ${resp.tokens}`;
         el.appendChild(t);
     }
     return el;
 }
 
-function typingBubble(who, name) {
+function typingBubble(p) {
     const el = document.createElement('div');
-    el.className = `bubble ai-bubble ${who}`;
-    el.appendChild(speakerEl(`${who}-dot`, name));
+    el.className = 'bubble ai-bubble';
+    const color = p.color || '#93a0b8';
+    el.style.borderColor = hexWithAlpha(color, 0.55);
+    el.style.background = hexWithAlpha(color, 0.09);
+    el.appendChild(speakerEl(color, p.name));
     const typing = document.createElement('div');
     typing.className = 'typing';
     typing.innerHTML = '<span></span><span></span><span></span>';
     el.appendChild(typing);
     return el;
+}
+
+function hexWithAlpha(hex, alpha) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+function renderLegend() {
+    legendDiv.innerHTML = '';
+    const chris = document.createElement('span');
+    chris.className = 'legend-item';
+    chris.innerHTML = '<span class="dot" style="background:#e8b04b"></span>Chris (you)';
+    legendDiv.appendChild(chris);
+    for (const p of participantsCache) {
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = p.color || '#93a0b8';
+        item.appendChild(dot);
+        item.appendChild(document.createTextNode(p.name));
+        legendDiv.appendChild(item);
+    }
 }
 
 // --- Settings ------------------------------------------------------------
@@ -248,13 +301,11 @@ const anthropicKeyInput = document.getElementById('set-anthropic-key');
 const openaiKeyInput = document.getElementById('set-openai-key');
 const anthropicKeyNote = document.getElementById('anthropic-key-note');
 const openaiKeyNote = document.getElementById('openai-key-note');
-const claudeModelInput = document.getElementById('set-claude-model');
-const chatgptModelInput = document.getElementById('set-chatgpt-model');
+const participantsList = document.getElementById('participants-list');
+const addAiBtn = document.getElementById('add-ai-btn');
 const hostInput = document.getElementById('set-host');
 const portInput = document.getElementById('set-port');
 const testResults = document.getElementById('test-results');
-const testClaude = document.getElementById('test-claude');
-const testChatgpt = document.getElementById('test-chatgpt');
 const testKeysBtn = document.getElementById('test-keys-btn');
 const saveSettingsBtn = document.getElementById('save-settings-btn');
 const resetSettingsBtn = document.getElementById('reset-settings-btn');
@@ -267,18 +318,117 @@ function keyNoteText(masked, source) {
 }
 
 function applySettingsSnapshot(data) {
-    // Keys are never shown in full — the inputs stay blank and the note
-    // shows the masked saved value.
+    // Keys are never shown in full — inputs stay blank, notes show masked values
     anthropicKeyInput.value = '';
     openaiKeyInput.value = '';
     anthropicKeyInput.placeholder = data.anthropic_api_key_masked || 'sk-ant-...';
     openaiKeyInput.placeholder = data.openai_api_key_masked || 'sk-...';
     anthropicKeyNote.textContent = keyNoteText(data.anthropic_api_key_masked, data.anthropic_key_source);
     openaiKeyNote.textContent = keyNoteText(data.openai_api_key_masked, data.openai_key_source);
-    claudeModelInput.value = data.claude_model || '';
-    chatgptModelInput.value = data.chatgpt_model || '';
     hostInput.value = data.host || '';
     portInput.value = data.port || '';
+
+    participantsCache = data.participants || [];
+    renderLegend();
+    renderParticipantCards();
+}
+
+function renderParticipantCards() {
+    participantsList.innerHTML = '';
+    for (const p of participantsCache) participantsList.appendChild(participantCard(p));
+}
+
+function participantCard(p = {}) {
+    const card = document.createElement('div');
+    card.className = 'participant-card';
+    card.dataset.pid = p.id || '';
+
+    const head = document.createElement('div');
+    head.className = 'participant-head';
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = p.color || '#93a0b8';
+    head.appendChild(dot);
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'p-name';
+    nameInput.placeholder = 'Name (e.g. Grok)';
+    nameInput.value = p.name || '';
+    head.appendChild(nameInput);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'p-remove danger';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => card.remove());
+    head.appendChild(removeBtn);
+    card.appendChild(head);
+
+    const grid = document.createElement('div');
+    grid.className = 'participant-grid';
+
+    grid.appendChild(pField('Provider', providerSelect(p.provider)));
+    grid.appendChild(pField('Model', pInput('p-model', 'text', p.model || '', 'e.g. gpt-4o-mini')));
+    grid.appendChild(pField('API Key (optional)', pInput('p-key', 'password', '',
+        p.api_key_masked ? `saved: ${p.api_key_masked}` : 'uses shared key above')));
+    grid.appendChild(pField('Base URL (optional)', pInput('p-url', 'text', p.base_url || '', 'e.g. https://api.x.ai/v1')));
+
+    card.appendChild(grid);
+    return card;
+}
+
+function pField(labelText, input) {
+    const wrap = document.createElement('label');
+    wrap.className = 'p-field';
+    const span = document.createElement('span');
+    span.textContent = labelText;
+    wrap.appendChild(span);
+    wrap.appendChild(input);
+    return wrap;
+}
+
+function pInput(cls, type, value, placeholder) {
+    const input = document.createElement('input');
+    input.className = cls;
+    input.type = type;
+    input.value = value;
+    input.placeholder = placeholder || '';
+    input.autocomplete = 'off';
+    return input;
+}
+
+function providerSelect(value) {
+    const sel = document.createElement('select');
+    sel.className = 'p-provider';
+    for (const [v, label] of [['anthropic', 'Anthropic (Claude)'], ['openai', 'OpenAI-compatible']]) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = label;
+        sel.appendChild(opt);
+    }
+    sel.value = value === 'anthropic' ? 'anthropic' : 'openai';
+    return sel;
+}
+
+addAiBtn.addEventListener('click', () => {
+    participantsList.appendChild(participantCard({}));
+});
+
+function collectParticipants() {
+    const cards = participantsList.querySelectorAll('.participant-card');
+    const roster = [];
+    for (const card of cards) {
+        roster.push({
+            id: card.dataset.pid || null,
+            name: card.querySelector('.p-name').value.trim(),
+            provider: card.querySelector('.p-provider').value,
+            model: card.querySelector('.p-model').value.trim(),
+            api_key: card.querySelector('.p-key').value.trim() || null,
+            base_url: card.querySelector('.p-url').value.trim() || null,
+        });
+    }
+    return roster;
 }
 
 async function openSettings() {
@@ -312,11 +462,9 @@ document.addEventListener('keydown', (e) => {
 });
 
 saveSettingsBtn.addEventListener('click', async () => {
-    const payload = {};
+    const payload = { participants: collectParticipants() };
     if (anthropicKeyInput.value.trim()) payload.anthropic_api_key = anthropicKeyInput.value.trim();
     if (openaiKeyInput.value.trim()) payload.openai_api_key = openaiKeyInput.value.trim();
-    if (claudeModelInput.value.trim()) payload.claude_model = claudeModelInput.value.trim();
-    if (chatgptModelInput.value.trim()) payload.chatgpt_model = chatgptModelInput.value.trim();
     if (hostInput.value.trim()) payload.host = hostInput.value.trim();
     if (portInput.value) payload.port = parseInt(portInput.value, 10);
 
@@ -344,22 +492,14 @@ saveSettingsBtn.addEventListener('click', async () => {
 
 testKeysBtn.addEventListener('click', async () => {
     testResults.classList.remove('hidden');
-    testClaude.textContent = 'Claude: testing...';
-    testClaude.className = 'test-line pending';
-    testChatgpt.textContent = 'ChatGPT: testing...';
-    testChatgpt.className = 'test-line pending';
+    testResults.innerHTML = '<div class="test-line pending">Testing every AI on the roster...</div>';
     testKeysBtn.disabled = true;
-
-    // Test keys typed into the form; falls back to the saved/env keys
-    const payload = {};
-    if (anthropicKeyInput.value.trim()) payload.anthropic_api_key = anthropicKeyInput.value.trim();
-    if (openaiKeyInput.value.trim()) payload.openai_api_key = openaiKeyInput.value.trim();
 
     try {
         const res = await fetch('/api/settings/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({}),
         });
         if (res.status === 404) {
             throw new Error('server is running old code — run: sudo systemctl restart team-talk');
@@ -369,27 +509,31 @@ testKeysBtn.addEventListener('click', async () => {
             throw new Error(err.detail || `request failed (${res.status})`);
         }
         const data = await res.json();
-        testClaude.textContent = `Claude: ${data.claude.ok ? '✓' : '✗'} ${data.claude.detail}`;
-        testClaude.className = `test-line ${data.claude.ok ? 'ok' : 'fail'}`;
-        testChatgpt.textContent = `ChatGPT: ${data.chatgpt.ok ? '✓' : '✗'} ${data.chatgpt.detail}`;
-        testChatgpt.className = `test-line ${data.chatgpt.ok ? 'ok' : 'fail'}`;
+        testResults.innerHTML = '';
+        for (const r of data.results) {
+            const line = document.createElement('div');
+            line.className = `test-line ${r.ok ? 'ok' : 'fail'}`;
+            line.textContent = `${r.name}: ${r.ok ? '✓' : '✗'} ${r.detail}`;
+            testResults.appendChild(line);
+        }
     } catch (err) {
-        testClaude.textContent = `Claude: ✗ test request failed (${err.message})`;
-        testClaude.className = 'test-line fail';
-        testChatgpt.textContent = `ChatGPT: ✗ test request failed (${err.message})`;
-        testChatgpt.className = 'test-line fail';
+        testResults.innerHTML = '';
+        const line = document.createElement('div');
+        line.className = 'test-line fail';
+        line.textContent = `✗ ${err.message}`;
+        testResults.appendChild(line);
     } finally {
         testKeysBtn.disabled = false;
     }
 });
 
 resetSettingsBtn.addEventListener('click', async () => {
-    if (!confirm('Delete all saved settings? The app will fall back to .env / environment variables.')) return;
+    if (!confirm('Delete all saved settings (keys and AI roster)? The app will fall back to .env / defaults.')) return;
     try {
         const res = await fetch('/api/settings', { method: 'DELETE' });
         const data = await res.json();
         applySettingsSnapshot(data);
-        setSettingsStatus('Saved settings cleared — now using .env / environment values.', 'ok');
+        setSettingsStatus('Saved settings cleared — now using .env / default values.', 'ok');
     } catch (err) {
         setSettingsStatus(`Reset failed: ${err.message}`, 'fail');
     }
@@ -397,5 +541,17 @@ resetSettingsBtn.addEventListener('click', async () => {
 
 // --- Init ----------------------------------------------------------------
 
-refreshSessions();
-chrisInput.focus();
+async function init() {
+    try {
+        const res = await fetch('/api/settings');
+        const data = await res.json();
+        participantsCache = data.participants || [];
+        renderLegend();
+    } catch (err) {
+        // legend just stays minimal if settings can't load
+    }
+    await refreshSessions();
+    chrisInput.focus();
+}
+
+init();

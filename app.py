@@ -1,14 +1,16 @@
-"""Team Talk — three-way collaborative discussion platform.
+"""Team Talk — collaborative AI discussion platform.
 
-Chris sends one message; Claude and ChatGPT are called simultaneously
-(asyncio.gather) and each sees the full history plus the other's
-previous response.
+Chris sends one message; every AI on the roster responds. Two turn
+styles: "parallel" (all at once via asyncio.gather) or "sequential"
+(one after another, each seeing the earlier answers this round, with
+the speaking order rotating every round). Three modes: collab, debate,
+and ai_only (the AIs talk to each other while Chris watches).
 """
 
 import asyncio
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -23,8 +25,7 @@ from pydantic import BaseModel
 import api_client
 import session_manager
 import settings_store
-from api_client import call_chatgpt, call_claude
-from conversation import build_context
+from conversation import MODES, build_context, system_prompt
 
 LAN_WARNING = "Do not expose Team Talk publicly unless authentication is added."
 
@@ -37,22 +38,26 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    mode: Optional[str] = "collab"          # collab | debate | ai_only
+    turn_style: Optional[str] = "parallel"  # parallel | sequential
+
+
+class ParticipantUpdate(BaseModel):
+    id: Optional[str] = None
+    name: str
+    provider: str = "openai"       # anthropic | openai (openai covers any
+    model: str                     # OpenAI-compatible endpoint via base_url)
+    api_key: Optional[str] = None  # blank = keep the saved key for this id
+    base_url: Optional[str] = None
+    color: Optional[str] = None
 
 
 class SettingsUpdate(BaseModel):
     anthropic_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
-    claude_model: Optional[str] = None
-    chatgpt_model: Optional[str] = None
     host: Optional[str] = None
     port: Optional[int] = None
-
-
-class TestKeysRequest(BaseModel):
-    # Optional: test keys typed into the form before saving them.
-    # When omitted, the currently configured keys are tested.
-    anthropic_api_key: Optional[str] = None
-    openai_api_key: Optional[str] = None
+    participants: Optional[List[ParticipantUpdate]] = None
 
 
 @app.get("/")
@@ -65,6 +70,8 @@ async def chat(request: ChatRequest):
     message = request.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message is empty")
+    mode = request.mode if request.mode in MODES else "collab"
+    turn_style = request.turn_style if request.turn_style in ("parallel", "sequential") else "parallel"
 
     session = None
     if request.session_id:
@@ -79,18 +86,40 @@ async def chat(request: ChatRequest):
     history = session["rounds"]
     round_number = len(history) + 1
 
-    claude_context = build_context(history, message, ai="claude")
-    chatgpt_context = build_context(history, message, ai="chatgpt")
+    participants = settings_store.get_participants()
+    names = [p["name"] for p in participants]
 
-    # The core requirement: both AIs are called at the same time
-    claude_result, chatgpt_result = await asyncio.gather(
-        call_claude(claude_context),
-        call_chatgpt(chatgpt_context),
-    )
+    def prompt_for(p, so_far=None):
+        others = [n for n in names if n != p["name"]]
+        return (
+            system_prompt(p["name"], others, mode),
+            build_context(history, message, p["name"], others, mode, so_far),
+        )
 
-    if claude_result["ok"] and chatgpt_result["ok"]:
+    responses = []
+    if turn_style == "sequential":
+        # Rotate the speaking order each round so nobody always goes first
+        rot = (round_number - 1) % len(participants)
+        order = participants[rot:] + participants[:rot]
+        so_far = []
+        for p in order:
+            system, ctx = prompt_for(p, so_far)
+            result = await api_client.call_participant(p, system, ctx)
+            if result["ok"]:
+                so_far.append({"name": p["name"], "text": result["text"]})
+            responses.append(_response_entry(p, result))
+    else:
+        # The core requirement: every AI is called at the same time
+        prompts = [prompt_for(p) for p in participants]
+        results = await asyncio.gather(
+            *[api_client.call_participant(p, s, c) for p, (s, c) in zip(participants, prompts)]
+        )
+        responses = [_response_entry(p, r) for p, r in zip(participants, results)]
+
+    ok_count = sum(1 for r in responses if not r["text"].startswith("Error:"))
+    if ok_count == len(responses):
         status = "success"
-    elif claude_result["ok"] or chatgpt_result["ok"]:
+    elif ok_count:
         status = "partial"
     else:
         status = "error"
@@ -99,10 +128,9 @@ async def chat(request: ChatRequest):
         "round": round_number,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "chris_message": message,
-        "claude_response": claude_result["text"],
-        "claude_tokens": claude_result["tokens"],
-        "chatgpt_response": chatgpt_result["text"],
-        "chatgpt_tokens": chatgpt_result["tokens"],
+        "mode": mode,
+        "turn_style": turn_style,
+        "responses": responses,
     }
 
     # Persist immediately so no round is ever lost
@@ -112,15 +140,42 @@ async def chat(request: ChatRequest):
     return {"session_id": session["id"], "status": status, **round_data}
 
 
+def _response_entry(p: dict, result: dict) -> dict:
+    return {
+        "id": p["id"],
+        "name": p["name"],
+        "text": result["text"],
+        "tokens": result["tokens"],
+        "color": p.get("color", "#93a0b8"),
+    }
+
+
+# --- Settings --------------------------------------------------------------
+
+def _public_participants() -> List[dict]:
+    """Roster for the browser — per-AI keys masked, never returned in full."""
+    out = []
+    for p in settings_store.get_participants():
+        out.append({
+            "id": p["id"],
+            "name": p["name"],
+            "provider": p.get("provider", "openai"),
+            "model": p.get("model", ""),
+            "base_url": p.get("base_url", ""),
+            "color": p.get("color", "#93a0b8"),
+            "api_key_masked": settings_store.mask_key(p.get("api_key")),
+            "uses_shared_key": not p.get("api_key"),
+        })
+    return out
+
+
 def _settings_snapshot() -> dict:
-    """Current effective settings — API keys are always masked."""
     return {
         "anthropic_api_key_masked": settings_store.mask_key(api_client.anthropic_key()),
         "anthropic_key_source": settings_store.source("anthropic_api_key", "ANTHROPIC_API_KEY"),
         "openai_api_key_masked": settings_store.mask_key(api_client.openai_key()),
         "openai_key_source": settings_store.source("openai_api_key", "OPENAI_API_KEY"),
-        "claude_model": api_client.claude_model(),
-        "chatgpt_model": api_client.chatgpt_model(),
+        "participants": _public_participants(),
         "host": settings_store.resolve("host", "HOST", "127.0.0.1"),
         "port": int(settings_store.resolve("port", "PORT", "5000")),
         "warning": LAN_WARNING,
@@ -134,12 +189,20 @@ async def get_settings():
 
 @app.post("/api/settings")
 async def save_settings(update: SettingsUpdate):
-    updates = {k: v for k, v in update.dict().items() if v not in (None, "")}
-    if updates.get("port") is not None:
-        port = int(updates["port"])
-        if not 1 <= port <= 65535:
+    updates = {}
+    for field in ("anthropic_api_key", "openai_api_key", "host"):
+        value = getattr(update, field)
+        if value not in (None, ""):
+            updates[field] = value
+    if update.port is not None:
+        if not 1 <= update.port <= 65535:
             raise HTTPException(status_code=400, detail="Port must be between 1 and 65535")
-        updates["port"] = str(port)
+        updates["port"] = str(update.port)
+    if update.participants is not None:
+        roster = settings_store.sanitize_participants([p.dict() for p in update.participants])
+        if not roster:
+            raise HTTPException(status_code=400, detail="At least one AI with a name and model is required")
+        updates["participants"] = roster
     try:
         settings_store.save(updates)
     except OSError as e:
@@ -162,13 +225,13 @@ async def reset_settings():
 
 
 @app.post("/api/settings/test")
-async def test_keys(request: TestKeysRequest):
-    claude_result, chatgpt_result = await asyncio.gather(
-        api_client.test_anthropic_key(request.anthropic_api_key or None),
-        api_client.test_openai_key(request.openai_api_key or None),
-    )
-    return {"claude": claude_result, "chatgpt": chatgpt_result}
+async def test_keys():
+    participants = settings_store.get_participants()
+    results = await asyncio.gather(*[api_client.test_participant(p) for p in participants])
+    return {"results": list(results)}
 
+
+# --- Sessions ---------------------------------------------------------------
 
 @app.get("/api/sessions")
 async def sessions():

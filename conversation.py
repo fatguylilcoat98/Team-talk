@@ -1,50 +1,79 @@
-"""Conversation state management for Team Talk.
+"""Conversation building for Team Talk — N participants, three modes.
 
-Builds the full-context prompt each AI receives on every round:
-complete history with speaker attribution, plus the other AI's
-most recent response called out explicitly.
+Modes:
+  collab   — the default: engage with the others, then answer Chris
+  debate   — forced disagreement, explicit "I disagree with X because",
+             confidence ratings on claims
+  ai_only  — Chris steps back; the AIs talk to each other directly
 
-The system prompts are deliberately forceful about cross-engagement —
-without this, models tend to answer Chris in parallel and politely
-summarize each other instead of actually conversing.
+The prompts are deliberately forceful about cross-engagement — without
+this, models answer Chris in parallel and politely summarize each other
+instead of actually conversing.
 """
 
 from typing import List, Optional
 
+MODES = {"collab", "debate", "ai_only"}
 
-def _system_prompt(me: str, other: str) -> str:
-    return f"""You are {me}, in a live three-way group chat with {other} (another AI) and Chris (a human).
+
+def system_prompt(me: str, others: List[str], mode: str = "collab") -> str:
+    others_text = _join_names(others)
+    base = f"""You are {me}, in a live group chat with {others_text} (other AIs) and Chris (a human).
 
 FACTS ABOUT THIS CHAT — never contradict these:
-- The full transcript, including every one of {other}'s messages, is included in each message you receive. You CAN see everything {other} says, and {other} can see everything you say. Never claim otherwise.
+- The full transcript, including every message from {others_text}, is included in each message you receive. You CAN see everything they say, and they can see everything you say. Never claim otherwise.
 - This is one continuous conversation, not a Q&A service. You are a participant, not a panelist.
 
 HOW TO BEHAVE:
-- Before answering Chris, react to {other}'s most recent message: pick at least one specific claim, quote or name it, and say plainly whether you agree or disagree and why. Skip this only if {other} hasn't spoken yet.
-- If you disagree with {other}, say so directly and argue the point. Do NOT smooth it over, do NOT claim you two have a "unified understanding" when you don't, and do NOT politely restate your own previous answer.
-- Never summarize the conversation back to Chris — he was there. Advance it instead: add something new, challenge something, or ask {other} or Chris a pointed question.
-- Speak as yourself ("I"), address {other} and Chris by name, and keep a conversational register — this is a chat between three people, not a report.
-- Be collaborative, not competitive: build on good ideas, challenge weak ones, concede when {other} is right.
-- Stay focused on the topic at hand, and keep responses reasonably tight — a chat message, not an essay."""
+- Before answering Chris, react to the most recent message from the other AI(s): pick at least one specific claim, quote or name it, and say plainly whether you agree or disagree and why. Skip this only if they haven't spoken yet.
+- If you disagree, say so directly and argue the point. Do NOT smooth it over, do NOT claim you have a "unified understanding" when you don't, and do NOT politely restate your own previous answer.
+- Never summarize the conversation back to Chris — he was there. Advance it: add something new, challenge something, or ask a pointed question.
+- Speak as yourself ("I"), address the others by name, and keep a conversational register — this is a chat, not a report.
+- Keep messages reasonably tight — a chat message, not an essay."""
+
+    if mode == "debate":
+        base += f"""
+
+DEBATE MODE IS ON:
+- Assume you and {others_text} disagree until proven otherwise. Stake out a clear position and defend it.
+- When you disagree, use the form: "I disagree with [name] on [specific claim] because..." and quote the claim.
+- Tag your key claims with a confidence level: (certain) / (likely) / (uncertain) / (unknown). Don't state shaky things as certain.
+- Concede a point only when genuinely convinced — and then say exactly what changed your mind.
+- No diplomatic hedging, no "we both make good points". Pick your ground."""
+    elif mode == "ai_only":
+        base += f"""
+
+AI-ONLY MODE IS ON:
+- Chris is stepping back to watch. This round is between you and {others_text}.
+- Address the other AI(s) directly by name, not Chris. Continue or deepen the ongoing discussion: respond to their last point, then push the conversation somewhere new.
+- End with a question or challenge aimed at the other AI(s) to keep the exchange going."""
+    else:
+        base += """
+
+- Be collaborative, not competitive: build on good ideas, challenge weak ones, concede when someone else is right."""
+
+    return base
 
 
-CLAUDE_SYSTEM_PROMPT = _system_prompt("Claude", "ChatGPT")
-CHATGPT_SYSTEM_PROMPT = _system_prompt("ChatGPT", "Claude")
-
-
-def build_context(rounds: List[dict], current_message: str, ai: str) -> str:
-    """Build the prompt for one AI.
+def build_context(
+    rounds: List[dict],
+    current_message: str,
+    me: str,
+    others: List[str],
+    mode: str = "collab",
+    so_far: Optional[List[dict]] = None,
+) -> str:
+    """Build the user-message prompt for one AI.
 
     Args:
-        rounds: previous rounds (each with chris_message / claude_response /
-            chatgpt_response / timestamp).
+        rounds: previous normalized rounds (chris_message + responses list).
         current_message: Chris's new message for this round.
-        ai: "claude" or "chatgpt" — the AI this prompt is being built for.
+        me: this AI's display name.
+        others: the other AIs' display names.
+        mode: collab | debate | ai_only.
+        so_far: in sequential turn mode, responses already given THIS round
+            by AIs that spoke before this one — [{"name", "text"}].
     """
-    me = "Claude" if ai == "claude" else "ChatGPT"
-    other_name = "ChatGPT" if ai == "claude" else "Claude"
-    other_key = "chatgpt_response" if ai == "claude" else "claude_response"
-
     lines = ["=== CONVERSATION HISTORY ==="]
     if not rounds:
         lines.append("(This is the first round — no history yet.)")
@@ -52,36 +81,64 @@ def build_context(rounds: List[dict], current_message: str, ai: str) -> str:
         lines.append("")
         lines.append(f"[Round {r['round']}] ({r.get('timestamp', '')})")
         lines.append(f"Chris: {r['chris_message']}")
-        lines.append("")
-        lines.append(f"Claude: {r['claude_response']}")
-        lines.append(f"ChatGPT: {r['chatgpt_response']}")
+        for resp in r.get("responses", []):
+            lines.append(f"{resp['name']}: {resp['text']}")
 
     lines.append("")
     lines.append("=== CURRENT ROUND ===")
     lines.append(f"Chris: {current_message}")
 
-    other_last = _last_response(rounds, other_key)
-    if other_last:
+    if so_far:
         lines.append("")
-        lines.append(f"{other_name}'s most recent message (react to this first): {other_last}")
+        lines.append("Already this round (they spoke before you — engage with this too):")
+        for resp in so_far:
+            lines.append(f"{resp['name']}: {resp['text']}")
+
+    last_lines = _last_responses(rounds, others)
+    if last_lines and not so_far:
         lines.append("")
+        lines.append("Most recent message from each other AI (react to these first):")
+        lines.extend(last_lines)
+
+    lines.append("")
+    others_text = _join_names(others)
+    if mode == "ai_only":
         lines.append(
-            f"Now write your next chat message as {me}. Start by engaging with "
-            f"{other_name}'s message above — quote or name one specific point and "
-            f"agree or push back on it — then respond to Chris. Do not summarize; converse."
+            f"Now write your next chat message as {me}, addressed to {others_text} "
+            f"(Chris is watching). Engage with their latest points directly and end "
+            f"with a question or challenge for them."
+        )
+    elif so_far or last_lines:
+        lines.append(
+            f"Now write your next chat message as {me}. Start by engaging with what "
+            f"{others_text} said — quote or name one specific point and agree or push "
+            f"back on it — then respond to Chris. Do not summarize; converse."
         )
     else:
-        lines.append("")
         lines.append(
-            f"Now write your next chat message as {me}. {other_name} hasn't spoken yet, "
-            f"so just respond to Chris directly and conversationally."
+            f"Now write your next chat message as {me}. The other AI(s) haven't spoken "
+            f"yet, so just respond to Chris directly and conversationally."
         )
     return "\n".join(lines)
 
 
-def _last_response(rounds: List[dict], key: str) -> Optional[str]:
+def _last_responses(rounds: List[dict], others: List[str]) -> List[str]:
+    found = {}
     for r in reversed(rounds):
-        text = r.get(key)
-        if text and not text.startswith("Error:"):
-            return text
-    return None
+        for resp in r.get("responses", []):
+            name = resp.get("name")
+            if name in others and name not in found:
+                text = resp.get("text", "")
+                if text and not text.startswith("Error:"):
+                    found[name] = text
+        if len(found) == len(others):
+            break
+    return [f"{name}: {text}" for name, text in found.items()]
+
+
+def _join_names(names: List[str]) -> str:
+    if not names:
+        return "the other AIs"
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
