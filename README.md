@@ -112,11 +112,9 @@ sudo systemctl restart team-talk
 
 You don't need to edit `.env` over SSH — open **⚙ Settings** (top-right button) to manage everything from any device, including your phone.
 
-**What you can set:**
+**All you need to do:** paste your two API keys and hit Save. That's it.
 
-- Anthropic API Key and OpenAI API Key
-- Claude Model and ChatGPT Model
-- Host and Port (take effect after a restart: `sudo systemctl restart team-talk`)
+Models are already set to the **cheapest option on each side** — `claude-haiku-4-5` and `gpt-4o-mini` — so you never have to pick anything. Models, host, and port live under a collapsed "Advanced" section you can ignore (host/port changes need a restart: `sudo systemctl restart team-talk`).
 
 **How keys are stored:**
 
@@ -157,8 +155,8 @@ All settings live in `.env`:
 | `MAX_TOKENS_CLAUDE` | `2000` | Max response length for Claude |
 | `MAX_TOKENS_CHATGPT` | `2000` | Max response length for ChatGPT |
 | `API_TIMEOUT` | `30` | Per-request timeout in seconds |
-| `CLAUDE_MODEL` | `claude-opus-4-8` | Which Claude model to use |
-| `CHATGPT_MODEL` | `gpt-4-turbo` | Which OpenAI model to use |
+| `CLAUDE_MODEL` | `claude-haiku-4-5` | Which Claude model to use (default = cheapest) |
+| `CHATGPT_MODEL` | `gpt-4o-mini` | Which OpenAI model to use (default = cheapest) |
 
 ## Troubleshooting
 

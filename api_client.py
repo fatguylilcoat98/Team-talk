@@ -20,8 +20,9 @@ from openai import AsyncOpenAI
 import settings_store
 from conversation import CLAUDE_SYSTEM_PROMPT, CHATGPT_SYSTEM_PROMPT
 
-DEFAULT_CLAUDE_MODEL = "claude-opus-4-8"
-DEFAULT_CHATGPT_MODEL = "gpt-4-turbo"
+# Cheapest models on each side — chatting doesn't need more.
+DEFAULT_CLAUDE_MODEL = "claude-haiku-4-5"
+DEFAULT_CHATGPT_MODEL = "gpt-4o-mini"
 
 MAX_TOKENS_CLAUDE = int(os.getenv("MAX_TOKENS_CLAUDE", "2000"))
 MAX_TOKENS_CHATGPT = int(os.getenv("MAX_TOKENS_CHATGPT", "2000"))

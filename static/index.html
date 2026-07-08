@@ -75,28 +75,36 @@
                     <span class="field-note" id="openai-key-note"></span>
                 </div>
 
-                <label for="set-claude-model">Claude Model</label>
-                <div class="field">
-                    <input type="text" id="set-claude-model" autocomplete="off">
-                </div>
-
-                <label for="set-chatgpt-model">ChatGPT Model</label>
-                <div class="field">
-                    <input type="text" id="set-chatgpt-model" autocomplete="off">
-                </div>
-
-                <label for="set-host">Host</label>
-                <div class="field">
-                    <input type="text" id="set-host" autocomplete="off">
-                    <span class="field-note">0.0.0.0 = reachable on your LAN; changes apply after restart</span>
-                </div>
-
-                <label for="set-port">Port</label>
-                <div class="field">
-                    <input type="number" id="set-port" min="1" max="65535" autocomplete="off">
-                    <span class="field-note">changes apply after restart</span>
-                </div>
             </div>
+
+            <details class="advanced">
+                <summary>Advanced — models &amp; network (already set to the cheapest models; you don't need this)</summary>
+                <div class="settings-grid">
+                    <label for="set-claude-model">Claude Model</label>
+                    <div class="field">
+                        <input type="text" id="set-claude-model" autocomplete="off">
+                        <span class="field-note">default claude-haiku-4-5 — the cheapest Claude</span>
+                    </div>
+
+                    <label for="set-chatgpt-model">ChatGPT Model</label>
+                    <div class="field">
+                        <input type="text" id="set-chatgpt-model" autocomplete="off">
+                        <span class="field-note">default gpt-4o-mini — the cheapest ChatGPT</span>
+                    </div>
+
+                    <label for="set-host">Host</label>
+                    <div class="field">
+                        <input type="text" id="set-host" autocomplete="off">
+                        <span class="field-note">0.0.0.0 = reachable on your LAN; changes apply after restart</span>
+                    </div>
+
+                    <label for="set-port">Port</label>
+                    <div class="field">
+                        <input type="number" id="set-port" min="1" max="65535" autocomplete="off">
+                        <span class="field-note">changes apply after restart</span>
+                    </div>
+                </div>
+            </details>
 
             <div id="test-results" class="test-results hidden">
                 <div id="test-claude" class="test-line"></div>
