@@ -90,7 +90,34 @@ button.danger:hover {
     font-size: 0.8em;
 }
 
-/* --- History --- */
+/* --- Legend (who's who) --- */
+.legend {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    color: var(--text-dim);
+    font-size: 0.88rem;
+}
+
+.legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    flex: none;
+}
+
+.chris-dot { background: var(--chris); }
+.claude-dot { background: var(--claude); }
+.chatgpt-dot { background: var(--chatgpt); }
+
+/* --- Chat feed --- */
 .conversation {
     flex: 1;
     min-height: 200px;
@@ -101,11 +128,11 @@ button.danger:hover {
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 16px;
-    max-height: 45vh;
+    max-height: 62vh;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 18px;
 }
 
 .empty-hint {
@@ -115,49 +142,125 @@ button.danger:hover {
 }
 
 .round {
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
 }
 
-.round:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
+.round-marker {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
-.message {
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: var(--surface-2);
+.round-marker::before,
+.round-marker::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+/* Chris: right-aligned gold bubble, like a messaging app */
+.chris-row {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.bubble {
+    border-radius: 14px;
+    padding: 10px 14px 12px;
+    max-width: 92%;
     white-space: pre-wrap;
     word-wrap: break-word;
 }
 
-.message strong {
-    display: block;
-    margin-bottom: 4px;
+.chris-bubble {
+    background: rgba(232, 176, 75, 0.16);
+    border: 1px solid rgba(232, 176, 75, 0.45);
+    border-bottom-right-radius: 4px;
 }
 
-.message.chris strong { color: var(--chris); }
+.speaker {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-weight: 700;
+    font-size: 0.92rem;
+    margin-bottom: 5px;
+}
 
-.round-responses {
+.chris-bubble .speaker { color: var(--chris); }
+
+/* AI replies: side by side on desktop, stacked on phones,
+   each with a bold name header so it's obvious who's talking */
+.ai-pair {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 10px;
 }
 
-.message.claude { border-left: 3px solid var(--claude); }
-.message.claude strong { color: var(--claude); }
-.message.chatgpt { border-left: 3px solid var(--chatgpt); }
-.message.chatgpt strong { color: var(--chatgpt); }
+.ai-bubble {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+    max-width: 100%;
+}
 
-.message .tokens-inline {
+.ai-bubble.claude {
+    border-color: rgba(217, 119, 87, 0.55);
+    background: rgba(217, 119, 87, 0.09);
+}
+
+.ai-bubble.claude .speaker { color: var(--claude); }
+
+.ai-bubble.chatgpt {
+    border-color: rgba(75, 179, 136, 0.55);
+    background: rgba(75, 179, 136, 0.09);
+}
+
+.ai-bubble.chatgpt .speaker { color: var(--chatgpt); }
+
+.ai-bubble.error-bubble .bubble-text { color: var(--danger); }
+
+.bubble-text {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.tokens-inline {
     display: block;
-    margin-top: 6px;
+    margin-top: 8px;
     color: var(--text-dim);
-    font-size: 0.78rem;
+    font-size: 0.75rem;
+}
+
+/* typing indicator while waiting for replies */
+.typing {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px 0;
+}
+
+.typing span {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    animation: typing-bounce 1.2s infinite ease-in-out;
+}
+
+.typing span:nth-child(2) { animation-delay: 0.15s; }
+.typing span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes typing-bounce {
+    0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-4px); }
 }
 
 /* --- Input --- */
@@ -193,60 +296,6 @@ button.danger:hover {
 
 #send-btn .hint {
     color: rgba(26, 20, 8, 0.65);
-}
-
-/* --- Live response panels --- */
-.responses {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-}
-
-.panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.panel h3 {
-    font-size: 1rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}
-
-.panel.claude { border-top: 3px solid var(--claude); }
-.panel.claude h3 { color: var(--claude); }
-.panel.chatgpt { border-top: 3px solid var(--chatgpt); }
-.panel.chatgpt h3 { color: var(--chatgpt); }
-
-.response-content {
-    flex: 1;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    min-height: 90px;
-    max-height: 38vh;
-    overflow-y: auto;
-    color: var(--text);
-}
-
-.response-content.loading {
-    color: var(--text-dim);
-    font-style: italic;
-}
-
-.response-content.error {
-    color: var(--danger);
-}
-
-.tokens {
-    color: var(--text-dim);
-    font-size: 0.8rem;
-    border-top: 1px solid var(--border);
-    padding-top: 8px;
 }
 
 /* --- Settings modal --- */
@@ -398,9 +447,12 @@ button.danger:hover {
         margin-bottom: -6px;
     }
 
-    .responses,
-    .round-responses {
+    .ai-pair {
         grid-template-columns: 1fr;
+    }
+
+    .bubble {
+        max-width: 100%;
     }
 
     .input-section {
