@@ -15,6 +15,10 @@ from typing import List, Optional
 
 MODES = {"collab", "debate", "ai_only"}
 
+# Short-term memory: this many recent rounds are shown verbatim; older
+# rounds fall away and long-term memory carries the important stuff.
+SHORT_TERM_ROUNDS = 12
+
 
 def system_prompt(me: str, others: List[str], mode: str = "collab") -> str:
     others_text = _join_names(others)
@@ -29,7 +33,17 @@ HOW TO BEHAVE:
 - If you disagree, say so directly and argue the point. Do NOT smooth it over, do NOT claim you have a "unified understanding" when you don't, and do NOT politely restate your own previous answer.
 - Never summarize the conversation back to Chris — he was there. Advance it: add something new, challenge something, or ask a pointed question.
 - Speak as yourself ("I"), address the others by name, and keep a conversational register — this is a chat, not a report.
-- Keep messages reasonably tight — a chat message, not an essay."""
+- Keep messages reasonably tight — a chat message, not an essay.
+
+MEMORY:
+- You have persistent long-term memory across sessions. Saved memories appear in the LONG-TERM MEMORY section when there are any.
+- To save something genuinely worth remembering for future conversations (a fact about Chris, a decision the group made, a strong preference — NOT small talk), end your message with a line of the form:
+  MEMORY: <one short sentence>
+  Maximum 2 per message; most messages should save none. The line is stored and removed from your visible reply automatically.
+- Only the most recent {SHORT_TERM_ROUNDS} rounds of a conversation are shown verbatim — anything older survives only if someone saved it to memory.
+
+ATTACHMENTS:
+- Chris can attach pictures and files. Images are shown to you directly; text/PDF contents appear in an ATTACHED FILES section. Refer to them naturally.""".replace("{SHORT_TERM_ROUNDS}", str(SHORT_TERM_ROUNDS))
 
     if mode == "debate":
         base += f"""
@@ -62,6 +76,8 @@ def build_context(
     others: List[str],
     mode: str = "collab",
     so_far: Optional[List[dict]] = None,
+    memory_block: str = "",
+    attachments_block: str = "",
 ) -> str:
     """Build the user-message prompt for one AI.
 
@@ -73,20 +89,41 @@ def build_context(
         mode: collab | debate | ai_only.
         so_far: in sequential turn mode, responses already given THIS round
             by AIs that spoke before this one — [{"name", "text"}].
+        memory_block: long-term memory section (may be empty).
+        attachments_block: ATTACHED FILES section for this round (may be empty).
     """
-    lines = ["=== CONVERSATION HISTORY ==="]
+    lines = []
+    if memory_block:
+        lines.append(memory_block)
+        lines.append("")
+
+    lines.append("=== CONVERSATION HISTORY ===")
     if not rounds:
         lines.append("(This is the first round — no history yet.)")
-    for r in rounds:
+    shown = rounds
+    if len(rounds) > SHORT_TERM_ROUNDS:
+        shown = rounds[-SHORT_TERM_ROUNDS:]
+        lines.append(
+            f"(Showing the last {SHORT_TERM_ROUNDS} of {len(rounds)} rounds — "
+            f"rely on long-term memory for older context.)"
+        )
+    for r in shown:
         lines.append("")
         lines.append(f"[Round {r['round']}] ({r.get('timestamp', '')})")
-        lines.append(f"Chris: {r['chris_message']}")
+        chris_line = f"Chris: {r['chris_message']}"
+        att_names = [a.get("name", "?") for a in r.get("attachments", [])]
+        if att_names:
+            chris_line += f"  [attached: {', '.join(att_names)}]"
+        lines.append(chris_line)
         for resp in r.get("responses", []):
             lines.append(f"{resp['name']}: {resp['text']}")
 
     lines.append("")
     lines.append("=== CURRENT ROUND ===")
     lines.append(f"Chris: {current_message}")
+    if attachments_block:
+        lines.append("")
+        lines.append(attachments_block)
 
     if so_far:
         lines.append("")

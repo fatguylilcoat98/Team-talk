@@ -73,8 +73,11 @@ def _rate_limit_message(name: str, e: Exception) -> str:
     return f"Error: {name}'s API is rate limited — wait a moment and retry."
 
 
-async def call_participant(p: dict, system: str, prompt: str) -> dict:
+async def call_participant(p: dict, system: str, prompt: str, images: list = None) -> dict:
     """Call one AI with its system prompt + built context.
+
+    images: [{"media_type": "image/png", "data": "<base64>"}] — attached
+    pictures from this round, passed natively so vision models can see them.
 
     Returns {text, tokens, ok} — never raises.
     """
@@ -89,21 +92,39 @@ async def call_participant(p: dict, system: str, prompt: str) -> dict:
     try:
         client = _get_client(p, key)
         if p.get("provider") == "anthropic":
+            if images:
+                content = [
+                    {"type": "image", "source": {"type": "base64",
+                     "media_type": img["media_type"], "data": img["data"]}}
+                    for img in images
+                ]
+                content.append({"type": "text", "text": prompt})
+            else:
+                content = prompt
             response = await client.messages.create(
                 model=p["model"],
                 max_tokens=MAX_TOKENS,
                 system=system,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": content}],
             )
             text = "".join(b.text for b in response.content if b.type == "text")
             tokens = response.usage.output_tokens
         else:
+            if images:
+                content = [
+                    {"type": "image_url", "image_url":
+                     {"url": f"data:{img['media_type']};base64,{img['data']}"}}
+                    for img in images
+                ]
+                content.append({"type": "text", "text": prompt})
+            else:
+                content = prompt
             response = await client.chat.completions.create(
                 model=p["model"],
                 max_tokens=MAX_TOKENS,
                 messages=[
                     {"role": "system", "content": system},
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": content},
                 ],
             )
             text = response.choices[0].message.content or ""

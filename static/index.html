@@ -22,6 +22,7 @@
                 </select>
                 <button id="export-btn" title="Download conversation as Markdown">Export as Markdown</button>
                 <button id="delete-btn" class="danger" title="Delete this session">Delete Session</button>
+                <button id="memory-btn" title="What the AIs remember across sessions">&#129504; Memory</button>
                 <button id="settings-btn" title="API keys and models">&#9881; Settings</button>
             </div>
         </header>
@@ -52,13 +53,32 @@
             </label>
         </div>
 
+        <div id="attach-chips" class="attach-chips"></div>
+
         <div class="input-section">
+            <button id="attach-btn" class="attach-btn" title="Attach pictures or files">&#128206;</button>
+            <input type="file" id="attach-input" multiple hidden
+                   accept="image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.html,.css,.log,.xml,.yaml,.yml,.sh,.ini,.conf,.toml">
             <textarea
                 id="chris-input"
                 placeholder="Your message to the AIs..."
                 rows="3"
             ></textarea>
             <button id="send-btn">Send <span class="hint">(Ctrl+Enter)</span></button>
+        </div>
+    </div>
+
+    <div id="memory-overlay" class="overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>&#129504; Long-term Memory</h2>
+                <button id="memory-close" class="close-btn" title="Close">&times;</button>
+            </div>
+            <p class="field-note">Things the AIs saved to remember across sessions — stored on your server in <code>memory/memory.json</code>. Delete anything wrong or stale.</p>
+            <div id="memory-list" class="memory-list"></div>
+            <div class="modal-actions">
+                <button id="memory-clear-btn" class="danger">Forget Everything</button>
+            </div>
         </div>
     </div>
 
