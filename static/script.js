@@ -216,6 +216,152 @@ function resetPanels() {
     chatgptTokens.textContent = 'tokens: --';
 }
 
+// --- Settings ------------------------------------------------------------
+
+const settingsBtn = document.getElementById('settings-btn');
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsClose = document.getElementById('settings-close');
+const anthropicKeyInput = document.getElementById('set-anthropic-key');
+const openaiKeyInput = document.getElementById('set-openai-key');
+const anthropicKeyNote = document.getElementById('anthropic-key-note');
+const openaiKeyNote = document.getElementById('openai-key-note');
+const claudeModelInput = document.getElementById('set-claude-model');
+const chatgptModelInput = document.getElementById('set-chatgpt-model');
+const hostInput = document.getElementById('set-host');
+const portInput = document.getElementById('set-port');
+const testResults = document.getElementById('test-results');
+const testClaude = document.getElementById('test-claude');
+const testChatgpt = document.getElementById('test-chatgpt');
+const testKeysBtn = document.getElementById('test-keys-btn');
+const saveSettingsBtn = document.getElementById('save-settings-btn');
+const resetSettingsBtn = document.getElementById('reset-settings-btn');
+const settingsStatus = document.getElementById('settings-status');
+
+function keyNoteText(masked, source) {
+    if (!masked) return 'not set';
+    const from = source === 'settings' ? 'saved in Settings' : 'from .env / environment';
+    return `saved: ${masked} (${from}) — leave blank to keep`;
+}
+
+function applySettingsSnapshot(data) {
+    // Keys are never shown in full — the inputs stay blank and the note
+    // shows the masked saved value.
+    anthropicKeyInput.value = '';
+    openaiKeyInput.value = '';
+    anthropicKeyInput.placeholder = data.anthropic_api_key_masked || 'sk-ant-...';
+    openaiKeyInput.placeholder = data.openai_api_key_masked || 'sk-...';
+    anthropicKeyNote.textContent = keyNoteText(data.anthropic_api_key_masked, data.anthropic_key_source);
+    openaiKeyNote.textContent = keyNoteText(data.openai_api_key_masked, data.openai_key_source);
+    claudeModelInput.value = data.claude_model || '';
+    chatgptModelInput.value = data.chatgpt_model || '';
+    hostInput.value = data.host || '';
+    portInput.value = data.port || '';
+}
+
+async function openSettings() {
+    setSettingsStatus('');
+    testResults.classList.add('hidden');
+    try {
+        const res = await fetch('/api/settings');
+        applySettingsSnapshot(await res.json());
+    } catch (err) {
+        setSettingsStatus(`Could not load settings: ${err.message}`, 'fail');
+    }
+    settingsOverlay.classList.remove('hidden');
+}
+
+function closeSettings() {
+    settingsOverlay.classList.add('hidden');
+}
+
+function setSettingsStatus(text, kind) {
+    settingsStatus.textContent = text;
+    settingsStatus.className = `settings-status${kind ? ' ' + kind : ''}`;
+}
+
+settingsBtn.addEventListener('click', openSettings);
+settingsClose.addEventListener('click', closeSettings);
+settingsOverlay.addEventListener('click', (e) => {
+    if (e.target === settingsOverlay) closeSettings();
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !settingsOverlay.classList.contains('hidden')) closeSettings();
+});
+
+saveSettingsBtn.addEventListener('click', async () => {
+    const payload = {};
+    if (anthropicKeyInput.value.trim()) payload.anthropic_api_key = anthropicKeyInput.value.trim();
+    if (openaiKeyInput.value.trim()) payload.openai_api_key = openaiKeyInput.value.trim();
+    if (claudeModelInput.value.trim()) payload.claude_model = claudeModelInput.value.trim();
+    if (chatgptModelInput.value.trim()) payload.chatgpt_model = chatgptModelInput.value.trim();
+    if (hostInput.value.trim()) payload.host = hostInput.value.trim();
+    if (portInput.value) payload.port = parseInt(portInput.value, 10);
+
+    saveSettingsBtn.disabled = true;
+    setSettingsStatus('Saving...');
+    try {
+        const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `Save failed (${res.status})`);
+        applySettingsSnapshot(data);
+        setSettingsStatus(data.note ? `Settings saved. ${data.note}` : 'Settings saved.', 'ok');
+    } catch (err) {
+        setSettingsStatus(`Save failed: ${err.message}`, 'fail');
+    } finally {
+        saveSettingsBtn.disabled = false;
+    }
+});
+
+testKeysBtn.addEventListener('click', async () => {
+    testResults.classList.remove('hidden');
+    testClaude.textContent = 'Claude: testing...';
+    testClaude.className = 'test-line pending';
+    testChatgpt.textContent = 'ChatGPT: testing...';
+    testChatgpt.className = 'test-line pending';
+    testKeysBtn.disabled = true;
+
+    // Test keys typed into the form; falls back to the saved/env keys
+    const payload = {};
+    if (anthropicKeyInput.value.trim()) payload.anthropic_api_key = anthropicKeyInput.value.trim();
+    if (openaiKeyInput.value.trim()) payload.openai_api_key = openaiKeyInput.value.trim();
+
+    try {
+        const res = await fetch('/api/settings/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        testClaude.textContent = `Claude: ${data.claude.ok ? '✓' : '✗'} ${data.claude.detail}`;
+        testClaude.className = `test-line ${data.claude.ok ? 'ok' : 'fail'}`;
+        testChatgpt.textContent = `ChatGPT: ${data.chatgpt.ok ? '✓' : '✗'} ${data.chatgpt.detail}`;
+        testChatgpt.className = `test-line ${data.chatgpt.ok ? 'ok' : 'fail'}`;
+    } catch (err) {
+        testClaude.textContent = `Claude: ✗ test request failed (${err.message})`;
+        testClaude.className = 'test-line fail';
+        testChatgpt.textContent = `ChatGPT: ✗ test request failed (${err.message})`;
+        testChatgpt.className = 'test-line fail';
+    } finally {
+        testKeysBtn.disabled = false;
+    }
+});
+
+resetSettingsBtn.addEventListener('click', async () => {
+    if (!confirm('Delete all saved settings? The app will fall back to .env / environment variables.')) return;
+    try {
+        const res = await fetch('/api/settings', { method: 'DELETE' });
+        const data = await res.json();
+        applySettingsSnapshot(data);
+        setSettingsStatus('Saved settings cleared — now using .env / environment values.', 'ok');
+    } catch (err) {
+        setSettingsStatus(`Reset failed: ${err.message}`, 'fail');
+    }
+});
+
 // --- Init ----------------------------------------------------------------
 
 refreshSessions();

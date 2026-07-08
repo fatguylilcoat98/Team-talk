@@ -17,6 +17,7 @@
                 </select>
                 <button id="export-btn" title="Download conversation as Markdown">Export as Markdown</button>
                 <button id="delete-btn" class="danger" title="Delete this session">Delete Session</button>
+                <button id="settings-btn" title="API keys and models">&#9881; Settings</button>
             </div>
         </header>
 
@@ -47,6 +48,68 @@
                 <div id="chatgpt-response" class="response-content">(waiting...)</div>
                 <div id="chatgpt-tokens" class="tokens">tokens: --</div>
             </div>
+        </div>
+    </div>
+
+    <div id="settings-overlay" class="overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button id="settings-close" class="close-btn" title="Close">&times;</button>
+            </div>
+
+            <p class="lan-warning">&#9888; Do not expose Team Talk publicly unless authentication is added.</p>
+
+            <div class="settings-grid">
+                <label for="set-anthropic-key">Anthropic API Key</label>
+                <div class="field">
+                    <input type="password" id="set-anthropic-key" autocomplete="off"
+                           placeholder="not set">
+                    <span class="field-note" id="anthropic-key-note"></span>
+                </div>
+
+                <label for="set-openai-key">OpenAI API Key</label>
+                <div class="field">
+                    <input type="password" id="set-openai-key" autocomplete="off"
+                           placeholder="not set">
+                    <span class="field-note" id="openai-key-note"></span>
+                </div>
+
+                <label for="set-claude-model">Claude Model</label>
+                <div class="field">
+                    <input type="text" id="set-claude-model" autocomplete="off">
+                </div>
+
+                <label for="set-chatgpt-model">ChatGPT Model</label>
+                <div class="field">
+                    <input type="text" id="set-chatgpt-model" autocomplete="off">
+                </div>
+
+                <label for="set-host">Host</label>
+                <div class="field">
+                    <input type="text" id="set-host" autocomplete="off">
+                    <span class="field-note">0.0.0.0 = reachable on your LAN; changes apply after restart</span>
+                </div>
+
+                <label for="set-port">Port</label>
+                <div class="field">
+                    <input type="number" id="set-port" min="1" max="65535" autocomplete="off">
+                    <span class="field-note">changes apply after restart</span>
+                </div>
+            </div>
+
+            <div id="test-results" class="test-results hidden">
+                <div id="test-claude" class="test-line"></div>
+                <div id="test-chatgpt" class="test-line"></div>
+            </div>
+
+            <div class="modal-actions">
+                <button id="test-keys-btn">Test Keys</button>
+                <button id="save-settings-btn" class="primary">Save Settings</button>
+                <button id="reset-settings-btn" class="danger" title="Delete config/settings.json and fall back to .env">Reset Saved Settings</button>
+            </div>
+
+            <p id="settings-status" class="settings-status"></p>
         </div>
     </div>
 
