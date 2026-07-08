@@ -1,0 +1,25 @@
+# systemd unit for Team Talk
+#
+# 1. Adjust WorkingDirectory / ExecStart / User below to match your install path
+# 2. sudo cp deploy/team-talk.service /etc/systemd/system/
+# 3. sudo systemctl daemon-reload
+# 4. sudo systemctl enable --now team-talk
+#
+# Logs: journalctl -u team-talk -f
+
+[Unit]
+Description=Team Talk — collaborative AI discussion platform
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/team-talk
+ExecStart=/opt/team-talk/.venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+# Run as an unprivileged user (create with: sudo useradd -r -s /usr/sbin/nologin teamtalk)
+User=teamtalk
+Group=teamtalk
+
+[Install]
+WantedBy=multi-user.target

@@ -44,6 +44,54 @@ Three-way collaborative discussion platform. Chris, Claude, and ChatGPT think to
    http://localhost:5000
    ```
 
+## Run on a server (Linux)
+
+To pull from GitHub and run Team Talk on your own server:
+
+```bash
+# 1. Get the code
+sudo mkdir -p /opt/team-talk && sudo chown "$USER" /opt/team-talk
+git clone https://github.com/fatguylilcoat98/Team-talk.git /opt/team-talk
+cd /opt/team-talk
+
+# 2. Install into a virtualenv
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# 3. Configure
+cp .env.example .env
+nano .env       # add your API keys, and set HOST=0.0.0.0
+
+# 4. Run
+.venv/bin/python app.py
+```
+
+**Important:** set `HOST=0.0.0.0` in `.env` so other machines on your network can reach it (the default `127.0.0.1` only accepts connections from the server itself). Then open `http://<your-server-ip>:5000` from any machine on your LAN. If your server has a firewall, allow the port: `sudo ufw allow 5000`.
+
+### Keep it running (systemd)
+
+To have Team Talk start on boot and restart on crashes:
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin teamtalk
+sudo chown -R teamtalk:teamtalk /opt/team-talk
+sudo cp deploy/team-talk.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now team-talk
+```
+
+Check on it with `systemctl status team-talk`, and watch logs with `journalctl -u team-talk -f`.
+
+### Updating
+
+```bash
+cd /opt/team-talk
+sudo -u teamtalk git pull
+sudo systemctl restart team-talk
+```
+
+> ⚠️ **Security note:** Team Talk has no login — anyone who can reach the port can chat on your API keys. Keep it on your LAN or behind a VPN (e.g. Tailscale). Don't port-forward it to the open internet.
+
 ## Usage
 
 1. Type your message in the input box
