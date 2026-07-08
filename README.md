@@ -114,7 +114,35 @@ You don't need to edit `.env` over SSH — open **⚙ Settings** (top-right butt
 
 **All you need to do:** paste your two API keys and hit Save. That's it.
 
-Models are already set to the **cheapest option on each side** — `claude-haiku-4-5` and `gpt-4o-mini` — so you never have to pick anything. Models, host, and port live under a collapsed "Advanced" section you can ignore (host/port changes need a restart: `sudo systemctl restart team-talk`).
+Models are already set to the **cheapest option on each side** — `claude-haiku-4-5` and `gpt-4o-mini` — so you never have to pick anything. Host/port live under a collapsed "Advanced" section you can ignore (changes need a restart: `sudo systemctl restart team-talk`).
+
+## Modes and turn-taking
+
+Two dropdowns above the message box:
+
+**Mode** — how the AIs behave:
+- 🤝 **Collaborate** (default): engage with each other's points, then answer you
+- ⚔️ **Debate**: forced disagreement — each AI stakes out a position, quotes and attacks the other's claims ("I disagree with X on ... because ..."), and tags claims with confidence levels (certain / likely / uncertain / unknown)
+- 🤖 **AIs talk to each other**: you step back and watch — they address each other directly and end each message with a challenge for the other
+
+**Turns** — how they take turns:
+- ⚡ **All at once** (default): every AI answers simultaneously — fastest
+- 🔁 **One after another**: each AI sees what the previous one just said this round and must engage with it — slower, but a real threaded conversation. The speaking order rotates every round so nobody always goes first.
+
+## Adding more AIs
+
+Settings → **Your AIs** → **+ Add AI**. Any Anthropic model or any OpenAI-compatible API works. Each AI gets its own color automatically. Examples:
+
+| AI | Provider | Base URL | Key |
+|---|---|---|---|
+| Claude | Anthropic | *(leave blank)* | shared Anthropic key |
+| ChatGPT | OpenAI-compatible | *(leave blank)* | shared OpenAI key |
+| Grok | OpenAI-compatible | `https://api.x.ai/v1` | your xAI key |
+| Gemini | OpenAI-compatible | `https://generativelanguage.googleapis.com/v1beta/openai/` | your Google AI key |
+| DeepSeek | OpenAI-compatible | `https://api.deepseek.com/v1` | your DeepSeek key |
+| Local Ollama | OpenAI-compatible | `http://localhost:11434/v1` | `ollama` (any text) |
+
+Up to 6 AIs. **Test AIs** checks every one separately. Old two-AI sessions still open fine.
 
 **How keys are stored:**
 

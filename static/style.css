@@ -201,7 +201,7 @@ button.danger:hover {
    each with a bold name header so it's obvious who's talking */
 .ai-pair {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 10px;
 }
 
@@ -261,6 +261,21 @@ button.danger:hover {
 @keyframes typing-bounce {
     0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
     30% { opacity: 1; transform: translateY(-4px); }
+}
+
+/* --- Mode / turn selectors --- */
+.chat-options {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.chat-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dim);
+    font-size: 0.88rem;
 }
 
 /* --- Input --- */
@@ -396,6 +411,73 @@ button.danger:hover {
     margin-bottom: 12px;
 }
 
+/* --- AI roster in Settings --- */
+.participants-section h3 {
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+}
+
+#participants-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.participant-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.participant-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.participant-head .p-name {
+    flex: 1;
+    font-weight: 600;
+}
+
+.participant-head .p-remove {
+    font-size: 0.8rem;
+    padding: 6px 10px;
+}
+
+.participant-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.p-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+}
+
+.p-field input,
+.p-field select {
+    width: 100%;
+    padding: 7px 10px;
+    font-size: 0.9rem;
+}
+
+#add-ai-btn {
+    align-self: flex-start;
+}
+
 .test-results {
     display: flex;
     flex-direction: column;
@@ -447,7 +529,8 @@ button.danger:hover {
         margin-bottom: -6px;
     }
 
-    .ai-pair {
+    .ai-pair,
+    .participant-grid {
         grid-template-columns: 1fr;
     }
 

@@ -21,10 +21,8 @@
             </div>
         </header>
 
-        <div class="legend">
+        <div class="legend" id="legend">
             <span class="legend-item"><span class="dot chris-dot"></span>Chris (you)</span>
-            <span class="legend-item"><span class="dot claude-dot"></span>Claude</span>
-            <span class="legend-item"><span class="dot chatgpt-dot"></span>ChatGPT</span>
         </div>
 
         <div class="conversation">
@@ -33,10 +31,26 @@
             </div>
         </div>
 
+        <div class="chat-options">
+            <label>Mode
+                <select id="mode-select" title="How the AIs should behave">
+                    <option value="collab">🤝 Collaborate</option>
+                    <option value="debate">⚔️ Debate</option>
+                    <option value="ai_only">🤖 AIs talk to each other</option>
+                </select>
+            </label>
+            <label>Turns
+                <select id="turn-select" title="How the AIs take turns">
+                    <option value="parallel">⚡ All at once</option>
+                    <option value="sequential">🔁 One after another</option>
+                </select>
+            </label>
+        </div>
+
         <div class="input-section">
             <textarea
                 id="chris-input"
-                placeholder="Your message to both Claude and ChatGPT..."
+                placeholder="Your message to the AIs..."
                 rows="3"
             ></textarea>
             <button id="send-btn">Send <span class="hint">(Ctrl+Enter)</span></button>
@@ -69,21 +83,16 @@
 
             </div>
 
+            <div class="participants-section">
+                <h3>Your AIs</h3>
+                <p class="field-note">Each AI uses the shared key above for its provider unless it has its own key. Add Grok, Gemini, DeepSeek, or a local Ollama with an OpenAI-compatible Base URL + that provider's key.</p>
+                <div id="participants-list"></div>
+                <button id="add-ai-btn" type="button">+ Add AI</button>
+            </div>
+
             <details class="advanced">
-                <summary>Advanced — models &amp; network (already set to the cheapest models; you don't need this)</summary>
+                <summary>Advanced — network (you probably don't need this)</summary>
                 <div class="settings-grid">
-                    <label for="set-claude-model">Claude Model</label>
-                    <div class="field">
-                        <input type="text" id="set-claude-model" autocomplete="off">
-                        <span class="field-note">default claude-haiku-4-5 — the cheapest Claude</span>
-                    </div>
-
-                    <label for="set-chatgpt-model">ChatGPT Model</label>
-                    <div class="field">
-                        <input type="text" id="set-chatgpt-model" autocomplete="off">
-                        <span class="field-note">default gpt-4o-mini — the cheapest ChatGPT</span>
-                    </div>
-
                     <label for="set-host">Host</label>
                     <div class="field">
                         <input type="text" id="set-host" autocomplete="off">
@@ -98,13 +107,10 @@
                 </div>
             </details>
 
-            <div id="test-results" class="test-results hidden">
-                <div id="test-claude" class="test-line"></div>
-                <div id="test-chatgpt" class="test-line"></div>
-            </div>
+            <div id="test-results" class="test-results hidden"></div>
 
             <div class="modal-actions">
-                <button id="test-keys-btn">Test Keys</button>
+                <button id="test-keys-btn">Test AIs</button>
                 <button id="save-settings-btn" class="primary">Save Settings</button>
                 <button id="reset-settings-btn" class="danger" title="Delete config/settings.json and fall back to .env">Reset Saved Settings</button>
             </div>

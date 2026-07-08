@@ -37,6 +37,35 @@ def new_session(session_id: Optional[str] = None) -> dict:
     return {"id": session_id, "created_at": _now(), "rounds": []}
 
 
+def normalize_round(r: dict) -> dict:
+    """Upgrade old two-AI rounds (claude_response/chatgpt_response fields)
+    to the roster shape: {"responses": [{id, name, text, tokens}, ...]}."""
+    if "responses" in r:
+        return r
+    upgraded = {
+        "round": r.get("round"),
+        "timestamp": r.get("timestamp", ""),
+        "chris_message": r.get("chris_message", ""),
+        "responses": [
+            {
+                "id": "claude",
+                "name": "Claude",
+                "text": r.get("claude_response", ""),
+                "tokens": r.get("claude_tokens", 0),
+                "color": "#d97757",
+            },
+            {
+                "id": "chatgpt",
+                "name": "ChatGPT",
+                "text": r.get("chatgpt_response", ""),
+                "tokens": r.get("chatgpt_tokens", 0),
+                "color": "#4bb388",
+            },
+        ],
+    }
+    return upgraded
+
+
 async def load_session(session_id: str) -> Optional[dict]:
     if not valid_id(session_id):
         return None
@@ -44,7 +73,9 @@ async def load_session(session_id: str) -> Optional[dict]:
     if not os.path.exists(path):
         return None
     async with aiofiles.open(path, "r", encoding="utf-8") as f:
-        return json.loads(await f.read())
+        session = json.loads(await f.read())
+    session["rounds"] = [normalize_round(r) for r in session.get("rounds", [])]
+    return session
 
 
 async def save_session(session: dict) -> None:
@@ -96,7 +127,8 @@ def export_markdown(session: dict) -> str:
         f"Created: {session.get('created_at', 'unknown')}",
         "",
     ]
-    for r in session.get("rounds", []):
+    for raw in session.get("rounds", []):
+        r = normalize_round(raw)
         lines += [
             "---",
             "",
@@ -104,13 +136,12 @@ def export_markdown(session: dict) -> str:
             "",
             f"**Chris:** {r['chris_message']}",
             "",
-            f"### Claude  (tokens: {r.get('claude_tokens', '--')})",
-            "",
-            r["claude_response"],
-            "",
-            f"### ChatGPT  (tokens: {r.get('chatgpt_tokens', '--')})",
-            "",
-            r["chatgpt_response"],
-            "",
         ]
+        for resp in r["responses"]:
+            lines += [
+                f"### {resp['name']}  (tokens: {resp.get('tokens', '--')})",
+                "",
+                resp.get("text", ""),
+                "",
+            ]
     return "\n".join(lines)
