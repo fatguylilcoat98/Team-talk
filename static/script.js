@@ -7,10 +7,6 @@ const deleteBtn = document.getElementById('delete-btn');
 const historyDiv = document.getElementById('history');
 const chrisInput = document.getElementById('chris-input');
 const sendBtn = document.getElementById('send-btn');
-const claudeResponse = document.getElementById('claude-response');
-const claudeTokens = document.getElementById('claude-tokens');
-const chatgptResponse = document.getElementById('chatgpt-response');
-const chatgptTokens = document.getElementById('chatgpt-tokens');
 
 let currentSessionId = null;
 
@@ -44,19 +40,12 @@ async function loadSession(sessionId) {
     for (const round of data.rounds) {
         appendRoundToHistory(round);
     }
-    const last = data.rounds[data.rounds.length - 1];
-    if (last) {
-        showResponses(last);
-    } else {
-        resetPanels();
-    }
     historyDiv.scrollTop = historyDiv.scrollHeight;
 }
 
 function startNewSession() {
     currentSessionId = null;
     historyDiv.innerHTML = '<p class="empty-hint">Start a new conversation below — both AIs will answer at the same time.</p>';
-    resetPanels();
 }
 
 sessionSelect.addEventListener('change', () => {
@@ -112,8 +101,16 @@ async function sendMessage() {
     const message = chrisInput.value.trim();
     if (!message) return;
 
-    showLoading();
     sendBtn.disabled = true;
+
+    // Show the round immediately: your bubble + two "typing..." bubbles
+    const pending = buildRound({
+        round: null,
+        chris_message: message,
+    }, true);
+    removeEmptyHint();
+    historyDiv.appendChild(pending);
+    historyDiv.scrollTop = historyDiv.scrollHeight;
 
     try {
         const res = await fetch('/api/chat', {
@@ -131,16 +128,19 @@ async function sendMessage() {
         currentSessionId = data.session_id;
         chrisInput.value = '';
 
-        appendRoundToHistory(data);
-        showResponses(data);
+        pending.replaceWith(buildRound(data));
         historyDiv.scrollTop = historyDiv.scrollHeight;
 
         if (isNewSession) await refreshSessions();
     } catch (err) {
-        claudeResponse.textContent = `Error: ${err.message}`;
-        claudeResponse.className = 'response-content error';
-        chatgptResponse.textContent = `Error: ${err.message}`;
-        chatgptResponse.className = 'response-content error';
+        pending.replaceWith(buildRound({
+            round: null,
+            chris_message: message,
+            claude_response: `Error: ${err.message}`,
+            claude_tokens: 0,
+            chatgpt_response: `Error: ${err.message}`,
+            chatgpt_tokens: 0,
+        }));
     } finally {
         sendBtn.disabled = false;
         chrisInput.focus();
@@ -149,34 +149,77 @@ async function sendMessage() {
 
 // --- Rendering -----------------------------------------------------------
 
-function appendRoundToHistory(round) {
+function removeEmptyHint() {
     const hint = historyDiv.querySelector('.empty-hint');
     if (hint) hint.remove();
+}
 
+function appendRoundToHistory(round) {
+    removeEmptyHint();
+    historyDiv.appendChild(buildRound(round));
+}
+
+function buildRound(round, pending = false) {
     const roundEl = document.createElement('div');
     roundEl.className = 'round';
 
-    roundEl.appendChild(messageEl('chris', `Chris (Round ${round.round})`, round.chris_message));
+    if (round.round) {
+        const marker = document.createElement('div');
+        marker.className = 'round-marker';
+        marker.textContent = `Round ${round.round}`;
+        roundEl.appendChild(marker);
+    }
 
+    // Chris — right side, gold
+    const chrisRow = document.createElement('div');
+    chrisRow.className = 'chris-row';
+    const chrisBubble = document.createElement('div');
+    chrisBubble.className = 'bubble chris-bubble';
+    chrisBubble.appendChild(speakerEl('chris-dot', 'Chris'));
+    const chrisText = document.createElement('div');
+    chrisText.className = 'bubble-text';
+    chrisText.textContent = round.chris_message;
+    chrisBubble.appendChild(chrisText);
+    chrisRow.appendChild(chrisBubble);
+    roundEl.appendChild(chrisRow);
+
+    // AI replies — left side, each clearly named
     const pair = document.createElement('div');
-    pair.className = 'round-responses';
-    pair.appendChild(messageEl('claude', 'Claude', round.claude_response, round.claude_tokens));
-    pair.appendChild(messageEl('chatgpt', 'ChatGPT', round.chatgpt_response, round.chatgpt_tokens));
+    pair.className = 'ai-pair';
+    if (pending) {
+        pair.appendChild(typingBubble('claude', 'Claude'));
+        pair.appendChild(typingBubble('chatgpt', 'ChatGPT'));
+    } else {
+        pair.appendChild(aiBubble('claude', 'Claude', round.claude_response, round.claude_tokens));
+        pair.appendChild(aiBubble('chatgpt', 'ChatGPT', round.chatgpt_response, round.chatgpt_tokens));
+    }
     roundEl.appendChild(pair);
 
-    historyDiv.appendChild(roundEl);
+    return roundEl;
 }
 
-function messageEl(who, label, text, tokens) {
+function speakerEl(dotClass, name) {
     const el = document.createElement('div');
-    el.className = `message ${who}`;
+    el.className = 'speaker';
+    const dot = document.createElement('span');
+    dot.className = `dot ${dotClass}`;
+    el.appendChild(dot);
+    el.appendChild(document.createTextNode(name));
+    return el;
+}
 
-    const strong = document.createElement('strong');
-    strong.textContent = `${label}:`;
-    el.appendChild(strong);
-    el.appendChild(document.createTextNode(text));
+function aiBubble(who, name, text, tokens) {
+    const el = document.createElement('div');
+    const isError = (text || '').startsWith('Error:');
+    el.className = `bubble ai-bubble ${who}${isError ? ' error-bubble' : ''}`;
+    el.appendChild(speakerEl(`${who}-dot`, name));
 
-    if (tokens !== undefined) {
+    const body = document.createElement('div');
+    body.className = 'bubble-text';
+    body.textContent = text || '';
+    el.appendChild(body);
+
+    if (tokens !== undefined && !isError) {
         const t = document.createElement('span');
         t.className = 'tokens-inline';
         t.textContent = `tokens: ${tokens}`;
@@ -185,35 +228,15 @@ function messageEl(who, label, text, tokens) {
     return el;
 }
 
-function showResponses(round) {
-    const claudeIsError = round.claude_response.startsWith('Error:');
-    const chatgptIsError = round.chatgpt_response.startsWith('Error:');
-
-    claudeResponse.textContent = round.claude_response;
-    claudeResponse.className = claudeIsError ? 'response-content error' : 'response-content';
-    claudeTokens.textContent = `tokens: ${round.claude_tokens}`;
-
-    chatgptResponse.textContent = round.chatgpt_response;
-    chatgptResponse.className = chatgptIsError ? 'response-content error' : 'response-content';
-    chatgptTokens.textContent = `tokens: ${round.chatgpt_tokens}`;
-}
-
-function showLoading() {
-    claudeResponse.textContent = 'Thinking...';
-    claudeResponse.className = 'response-content loading';
-    chatgptResponse.textContent = 'Thinking...';
-    chatgptResponse.className = 'response-content loading';
-    claudeTokens.textContent = 'tokens: --';
-    chatgptTokens.textContent = 'tokens: --';
-}
-
-function resetPanels() {
-    claudeResponse.textContent = '(waiting...)';
-    claudeResponse.className = 'response-content';
-    chatgptResponse.textContent = '(waiting...)';
-    chatgptResponse.className = 'response-content';
-    claudeTokens.textContent = 'tokens: --';
-    chatgptTokens.textContent = 'tokens: --';
+function typingBubble(who, name) {
+    const el = document.createElement('div');
+    el.className = `bubble ai-bubble ${who}`;
+    el.appendChild(speakerEl(`${who}-dot`, name));
+    const typing = document.createElement('div');
+    typing.className = 'typing';
+    typing.innerHTML = '<span></span><span></span><span></span>';
+    el.appendChild(typing);
+    return el;
 }
 
 // --- Settings ------------------------------------------------------------

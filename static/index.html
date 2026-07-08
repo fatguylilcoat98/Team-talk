@@ -21,6 +21,12 @@
             </div>
         </header>
 
+        <div class="legend">
+            <span class="legend-item"><span class="dot chris-dot"></span>Chris (you)</span>
+            <span class="legend-item"><span class="dot claude-dot"></span>Claude</span>
+            <span class="legend-item"><span class="dot chatgpt-dot"></span>ChatGPT</span>
+        </div>
+
         <div class="conversation">
             <div id="history" class="history">
                 <p class="empty-hint">Start a new conversation below — both AIs will answer at the same time.</p>
@@ -34,20 +40,6 @@
                 rows="3"
             ></textarea>
             <button id="send-btn">Send <span class="hint">(Ctrl+Enter)</span></button>
-        </div>
-
-        <div class="responses">
-            <div class="panel claude">
-                <h3>Claude</h3>
-                <div id="claude-response" class="response-content">(waiting...)</div>
-                <div id="claude-tokens" class="tokens">tokens: --</div>
-            </div>
-
-            <div class="panel chatgpt">
-                <h3>ChatGPT</h3>
-                <div id="chatgpt-response" class="response-content">(waiting...)</div>
-                <div id="chatgpt-tokens" class="tokens">tokens: --</div>
-            </div>
         </div>
     </div>
 
