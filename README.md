@@ -118,6 +118,25 @@ You don't need to edit `.env` over SSH — open **⚙ Settings** (top-right butt
 
 Models are already set to the **cheapest option on each side** — `claude-haiku-4-5` and `gpt-4o-mini` — so you never have to pick anything. Host/port live under a collapsed "Advanced" section you can ignore (changes need a restart: `sudo systemctl restart team-talk`).
 
+## Pictures & files
+
+Tap **📎** next to the message box to attach pictures or files (works from a phone's camera roll). Attachments go to every AI with your message:
+
+- **Images** (png/jpg/gif/webp): the AIs actually *see* them (vision)
+- **PDFs and text files** (.txt, .md, .csv, code, ...): the contents are read and included
+- Limit: 8 MB per file, 8 files per message. Files are stored on your server in `uploads/` (gitignored).
+
+Heads-up: images cost more tokens than text — a photo adds roughly a thousand tokens per AI per message.
+
+## Memory
+
+The AIs have **long-term memory that survives across sessions**, stored on your server's hard drive (`memory/memory.json` — gitignored, no external database).
+
+- **How memories get saved:** when an AI decides something is worth keeping (a fact about you, a decision the group made, a preference), it saves a one-line memory automatically — you'll see a small "💾 saved a memory" tag under its reply. You can also just tell them: *"remember that ..."*
+- **How memories get used:** every conversation (any session, any AI) starts with the saved memories in context, so they genuinely remember.
+- **Short-term memory:** the last 12 rounds of the current conversation are always included verbatim; older rounds age out, and whatever mattered survives via long-term memory.
+- **Managing it:** tap **🧠 Memory** in the header to see everything they've saved, delete individual memories, or hit "Forget Everything."
+
 ## Modes and turn-taking
 
 Two dropdowns above the message box:

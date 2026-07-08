@@ -16,13 +16,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import base64
+
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import api_client
+import file_store
+import memory_store
 import session_manager
 import settings_store
 from conversation import MODES, build_context, system_prompt
@@ -54,6 +58,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     mode: Optional[str] = "collab"          # collab | debate | ai_only
     turn_style: Optional[str] = "parallel"  # parallel | sequential
+    attachments: Optional[List[str]] = None  # upload ids from /api/upload
 
 
 class ParticipantUpdate(BaseModel):
@@ -100,6 +105,25 @@ async def chat(request: ChatRequest):
     history = session["rounds"]
     round_number = len(history) + 1
 
+    # Attachments: images go to the APIs natively; text/PDF content is
+    # inlined into the round's context
+    att_metas = []
+    for att_id in (request.attachments or [])[:8]:
+        meta = file_store.get_meta(att_id)
+        if meta and file_store.get_path(att_id):
+            att_metas.append(meta)
+    images = []
+    for meta in att_metas:
+        if meta["kind"] == "image":
+            raw = file_store.load_bytes(meta["id"])
+            if raw:
+                images.append({
+                    "media_type": meta["mime"],
+                    "data": base64.standard_b64encode(raw).decode("ascii"),
+                })
+    attachments_block = file_store.attachments_context(att_metas)
+    memory_block = memory_store.context_block()
+
     participants = settings_store.get_participants()
     names = [p["name"] for p in participants]
 
@@ -107,7 +131,8 @@ async def chat(request: ChatRequest):
         others = [n for n in names if n != p["name"]]
         return (
             system_prompt(p["name"], others, mode),
-            build_context(history, message, p["name"], others, mode, so_far),
+            build_context(history, message, p["name"], others, mode, so_far,
+                          memory_block=memory_block, attachments_block=attachments_block),
         )
 
     responses = []
@@ -118,7 +143,7 @@ async def chat(request: ChatRequest):
         so_far = []
         for p in order:
             system, ctx = prompt_for(p, so_far)
-            result = await api_client.call_participant(p, system, ctx)
+            result = await api_client.call_participant(p, system, ctx, images=images)
             if result["ok"]:
                 so_far.append({"name": p["name"], "text": result["text"]})
             responses.append(_response_entry(p, result))
@@ -126,9 +151,19 @@ async def chat(request: ChatRequest):
         # The core requirement: every AI is called at the same time
         prompts = [prompt_for(p) for p in participants]
         results = await asyncio.gather(
-            *[api_client.call_participant(p, s, c) for p, (s, c) in zip(participants, prompts)]
+            *[api_client.call_participant(p, s, c, images=images)
+              for p, (s, c) in zip(participants, prompts)]
         )
         responses = [_response_entry(p, r) for p, r in zip(participants, results)]
+
+    # Long-term memory: strip MEMORY: lines and store them on disk
+    for r in responses:
+        cleaned, memories = memory_store.extract_memories(r["text"])
+        if memories:
+            r["text"] = cleaned
+            for m in memories:
+                memory_store.add(m, r["name"])
+            r["memories_saved"] = len(memories)
 
     ok_count = sum(1 for r in responses if not r["text"].startswith("Error:"))
     if ok_count == len(responses):
@@ -144,6 +179,9 @@ async def chat(request: ChatRequest):
         "chris_message": message,
         "mode": mode,
         "turn_style": turn_style,
+        "attachments": [
+            {"id": m["id"], "name": m["name"], "kind": m["kind"]} for m in att_metas
+        ],
         "responses": responses,
     }
 
@@ -243,6 +281,47 @@ async def test_keys():
     participants = settings_store.get_participants()
     results = await asyncio.gather(*[api_client.test_participant(p) for p in participants])
     return {"results": list(results)}
+
+
+# --- Uploads ----------------------------------------------------------------
+
+@app.post("/api/upload")
+async def upload(file: UploadFile = File(...)):
+    content = await file.read()
+    try:
+        meta = file_store.save_upload(file.filename or "file", content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": meta["id"], "name": meta["name"], "kind": meta["kind"], "size": meta["size"]}
+
+
+@app.get("/api/uploads/{file_id}")
+async def serve_upload(file_id: str):
+    meta = file_store.get_meta(file_id)
+    path = file_store.get_path(file_id) if meta else None
+    if not path:
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, media_type=meta["mime"], filename=meta["name"])
+
+
+# --- Memory -------------------------------------------------------------------
+
+@app.get("/api/memory")
+async def get_memory():
+    return {"memories": memory_store.list_memories()}
+
+
+@app.delete("/api/memory/{memory_id}")
+async def delete_memory(memory_id: str):
+    if not memory_store.delete(memory_id):
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"status": "deleted"}
+
+
+@app.delete("/api/memory")
+async def clear_memory():
+    removed = memory_store.clear()
+    return {"status": "cleared", "removed": removed}
 
 
 # --- Sessions ---------------------------------------------------------------

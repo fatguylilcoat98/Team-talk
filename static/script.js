@@ -102,6 +102,52 @@ turnSelect.value = localStorage.getItem('teamtalk-turns') || 'parallel';
 modeSelect.addEventListener('change', () => localStorage.setItem('teamtalk-mode', modeSelect.value));
 turnSelect.addEventListener('change', () => localStorage.setItem('teamtalk-turns', turnSelect.value));
 
+// --- Attachments -----------------------------------------------------------
+
+const attachBtn = document.getElementById('attach-btn');
+const attachInput = document.getElementById('attach-input');
+const attachChips = document.getElementById('attach-chips');
+let pendingAttachments = [];  // [{id, name, kind}]
+
+attachBtn.addEventListener('click', () => attachInput.click());
+
+attachInput.addEventListener('change', async () => {
+    for (const file of attachInput.files) {
+        const form = new FormData();
+        form.append('file', file);
+        try {
+            const res = await fetch('/api/upload', { method: 'POST', body: form });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `upload failed (${res.status})`);
+            pendingAttachments.push(data);
+        } catch (err) {
+            alert(`Could not attach ${file.name}: ${err.message}`);
+        }
+    }
+    attachInput.value = '';
+    renderAttachChips();
+});
+
+function renderAttachChips() {
+    attachChips.innerHTML = '';
+    for (const att of pendingAttachments) {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = `${att.kind === 'image' ? '🖼' : '📄'} ${att.name} `;
+        const x = document.createElement('button');
+        x.className = 'chip-x';
+        x.textContent = '×';
+        x.title = 'Remove attachment';
+        x.addEventListener('click', () => {
+            pendingAttachments = pendingAttachments.filter((a) => a.id !== att.id);
+            renderAttachChips();
+        });
+        chip.appendChild(x);
+        attachChips.appendChild(chip);
+    }
+    attachChips.style.display = pendingAttachments.length ? 'flex' : 'none';
+}
+
 // --- Chat ----------------------------------------------------------------
 
 sendBtn.addEventListener('click', sendMessage);
@@ -114,9 +160,11 @@ async function sendMessage() {
     if (!message) return;
 
     sendBtn.disabled = true;
+    const sentAttachments = pendingAttachments;
 
     // Show the round immediately: your bubble + typing bubbles for every AI
-    const pending = buildRound({ round: null, chris_message: message }, true);
+    const pending = buildRound(
+        { round: null, chris_message: message, attachments: sentAttachments }, true);
     removeEmptyHint();
     historyDiv.appendChild(pending);
     historyDiv.scrollTop = historyDiv.scrollHeight;
@@ -130,6 +178,7 @@ async function sendMessage() {
                 session_id: currentSessionId,
                 mode: modeSelect.value,
                 turn_style: turnSelect.value,
+                attachments: sentAttachments.map((a) => a.id),
             }),
         });
         if (!res.ok) {
@@ -141,6 +190,8 @@ async function sendMessage() {
         const isNewSession = !currentSessionId;
         currentSessionId = data.session_id;
         chrisInput.value = '';
+        pendingAttachments = [];
+        renderAttachChips();
 
         pending.replaceWith(buildRound(data));
         historyDiv.scrollTop = historyDiv.scrollHeight;
@@ -214,6 +265,26 @@ function buildRound(round, pending = false) {
     chrisText.className = 'bubble-text';
     chrisText.textContent = round.chris_message;
     chrisBubble.appendChild(chrisText);
+
+    // Attached pictures/files shown inside Chris's bubble
+    for (const att of round.attachments || []) {
+        if (att.kind === 'image') {
+            const img = document.createElement('img');
+            img.className = 'chat-img';
+            img.src = `/api/uploads/${att.id}`;
+            img.alt = att.name;
+            img.loading = 'lazy';
+            chrisBubble.appendChild(img);
+        } else {
+            const fileChip = document.createElement('a');
+            fileChip.className = 'chip file-chip';
+            fileChip.textContent = `📄 ${att.name}`;
+            fileChip.href = `/api/uploads/${att.id}`;
+            fileChip.target = '_blank';
+            chrisBubble.appendChild(fileChip);
+        }
+    }
+
     chrisRow.appendChild(chrisBubble);
     roundEl.appendChild(chrisRow);
 
@@ -262,7 +333,11 @@ function aiBubble(resp) {
     if (resp.tokens !== undefined && !isError) {
         const t = document.createElement('span');
         t.className = 'tokens-inline';
-        t.textContent = `tokens: ${resp.tokens}`;
+        let extra = '';
+        if (resp.memories_saved) {
+            extra = `  ·  💾 saved ${resp.memories_saved === 1 ? 'a memory' : resp.memories_saved + ' memories'}`;
+        }
+        t.textContent = `tokens: ${resp.tokens}${extra}`;
         el.appendChild(t);
     }
     return el;
@@ -552,6 +627,68 @@ resetSettingsBtn.addEventListener('click', async () => {
     } catch (err) {
         setSettingsStatus(`Reset failed: ${err.message}`, 'fail');
     }
+});
+
+// --- Memory ------------------------------------------------------------------
+
+const memoryBtn = document.getElementById('memory-btn');
+const memoryOverlay = document.getElementById('memory-overlay');
+const memoryClose = document.getElementById('memory-close');
+const memoryList = document.getElementById('memory-list');
+const memoryClearBtn = document.getElementById('memory-clear-btn');
+
+memoryBtn.addEventListener('click', openMemory);
+memoryClose.addEventListener('click', () => memoryOverlay.classList.add('hidden'));
+memoryOverlay.addEventListener('click', (e) => {
+    if (e.target === memoryOverlay) memoryOverlay.classList.add('hidden');
+});
+
+async function openMemory() {
+    memoryOverlay.classList.remove('hidden');
+    await renderMemories();
+}
+
+async function renderMemories() {
+    memoryList.innerHTML = '<p class="field-note">Loading…</p>';
+    try {
+        const res = await fetch('/api/memory');
+        const data = await res.json();
+        memoryList.innerHTML = '';
+        if (!data.memories.length) {
+            memoryList.innerHTML = '<p class="field-note">Nothing saved yet. The AIs save memories on their own when something seems worth keeping — or tell them: "remember that ..."</p>';
+            return;
+        }
+        for (const m of [...data.memories].reverse()) {
+            const row = document.createElement('div');
+            row.className = 'memory-item';
+            const text = document.createElement('div');
+            text.className = 'memory-text';
+            text.textContent = m.text;
+            const meta = document.createElement('div');
+            meta.className = 'memory-meta';
+            meta.textContent = `${m.by} · ${(m.created_at || '').slice(0, 10)}`;
+            const del = document.createElement('button');
+            del.className = 'memory-del danger';
+            del.textContent = '×';
+            del.title = 'Forget this';
+            del.addEventListener('click', async () => {
+                await fetch(`/api/memory/${encodeURIComponent(m.id)}`, { method: 'DELETE' });
+                renderMemories();
+            });
+            row.appendChild(text);
+            row.appendChild(meta);
+            row.appendChild(del);
+            memoryList.appendChild(row);
+        }
+    } catch (err) {
+        memoryList.innerHTML = `<p class="field-note">Could not load memory: ${err.message}</p>`;
+    }
+}
+
+memoryClearBtn.addEventListener('click', async () => {
+    if (!confirm('Delete ALL long-term memories? The AIs will forget everything saved so far.')) return;
+    await fetch('/api/memory', { method: 'DELETE' });
+    renderMemories();
 });
 
 // --- Stale-server detection ------------------------------------------------

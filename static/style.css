@@ -300,6 +300,102 @@ button.danger:hover {
     font-size: 0.88rem;
 }
 
+/* --- Attachments --- */
+.attach-chips {
+    display: none;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    color: var(--text);
+    text-decoration: none;
+}
+
+.chip-x {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 1rem;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.chip-x:hover {
+    color: var(--danger);
+    background: none;
+}
+
+.file-chip {
+    margin-top: 8px;
+    align-self: flex-start;
+    display: inline-flex;
+}
+
+.chat-img {
+    display: block;
+    max-width: min(260px, 100%);
+    max-height: 260px;
+    border-radius: 10px;
+    margin-top: 8px;
+    border: 1px solid var(--border);
+}
+
+.attach-btn {
+    align-self: flex-end;
+    font-size: 1.15rem;
+    padding: 10px 14px;
+}
+
+/* --- Memory modal --- */
+.memory-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 45vh;
+    overflow-y: auto;
+}
+
+.memory-item {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+}
+
+.memory-text {
+    font-size: 0.92rem;
+}
+
+.memory-meta {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.memory-del {
+    border: none;
+    background: none;
+    font-size: 1.1rem;
+    padding: 2px 6px;
+}
+
+.memory-del:hover {
+    background: rgba(208, 85, 85, 0.15);
+}
+
 /* --- Input --- */
 .input-section {
     display: flex;
