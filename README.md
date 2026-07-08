@@ -90,11 +90,13 @@ sudo chown -R teamtalk:teamtalk /opt/team-talk
 
 ### Updating
 
+One command — it pulls the latest code **and** restarts the service (both steps are required; pulling without restarting leaves the server running old code):
+
 ```bash
-cd /opt/team-talk
-sudo -u teamtalk git pull
-sudo systemctl restart team-talk
+sudo /opt/team-talk/update.sh
 ```
+
+If you ever pull without restarting, the app will show a red banner at the top telling you to restart — that's your cue to run `sudo systemctl restart team-talk`.
 
 > ⚠️ **Security note:** Team Talk has no login — anyone who can reach the port can chat on your API keys. Keep it on your LAN or behind a VPN (e.g. Tailscale). Don't port-forward it to the open internet.
 
