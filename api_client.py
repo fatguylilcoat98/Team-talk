@@ -20,6 +20,20 @@ from openai import AsyncOpenAI
 import settings_store
 from conversation import CLAUDE_SYSTEM_PROMPT, CHATGPT_SYSTEM_PROMPT
 
+OPENAI_NO_CREDITS_MSG = (
+    "Error: your OpenAI account is out of credits — OpenAI reports this as a "
+    "rate limit. Add credits at platform.openai.com → Settings → Billing, "
+    "then try again."
+)
+
+
+def _openai_rate_limit_message(e: Exception) -> str:
+    # OpenAI returns 429 both for real rate limits and for accounts with a
+    # $0 balance; the latter carries the code "insufficient_quota".
+    if "insufficient_quota" in str(e):
+        return OPENAI_NO_CREDITS_MSG
+    return "Error: OpenAI API rate limited — wait a moment and retry."
+
 # Cheapest models on each side — chatting doesn't need more.
 DEFAULT_CLAUDE_MODEL = "claude-haiku-4-5"
 DEFAULT_CHATGPT_MODEL = "gpt-4o-mini"
@@ -115,8 +129,8 @@ async def call_chatgpt(prompt: str) -> dict:
         text = response.choices[0].message.content or ""
         tokens = response.usage.completion_tokens if response.usage else 0
         return {"text": text, "tokens": tokens, "ok": True}
-    except openai.RateLimitError:
-        return {"text": "Error: OpenAI API rate limited — wait a moment and retry.", "tokens": 0, "ok": False}
+    except openai.RateLimitError as e:
+        return {"text": _openai_rate_limit_message(e), "tokens": 0, "ok": False}
     except openai.APIStatusError as e:
         return {"text": f"Error: OpenAI API error ({e.status_code}): {e.message}", "tokens": 0, "ok": False}
     except openai.APIConnectionError:
@@ -157,6 +171,8 @@ async def test_openai_key(key: Optional[str] = None) -> dict:
         return {"ok": True, "detail": "OpenAI key is valid."}
     except openai.AuthenticationError:
         return {"ok": False, "detail": "OpenAI key was rejected (invalid or revoked)."}
+    except openai.RateLimitError as e:
+        return {"ok": False, "detail": _openai_rate_limit_message(e).removeprefix("Error: ")}
     except openai.APIStatusError as e:
         return {"ok": False, "detail": f"OpenAI API error ({e.status_code}): {e.message}"}
     except openai.APIConnectionError:
