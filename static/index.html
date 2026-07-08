@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Talk</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Team Talk</h1>
+            <p class="tagline">Chris · Claude · ChatGPT — thinking together</p>
+            <div class="controls">
+                <select id="session-select">
+                    <option value="new">New Session</option>
+                </select>
+                <button id="export-btn" title="Download conversation as Markdown">Export as Markdown</button>
+                <button id="delete-btn" class="danger" title="Delete this session">Delete Session</button>
+            </div>
+        </header>
+
+        <div class="conversation">
+            <div id="history" class="history">
+                <p class="empty-hint">Start a new conversation below — both AIs will answer at the same time.</p>
+            </div>
+        </div>
+
+        <div class="input-section">
+            <textarea
+                id="chris-input"
+                placeholder="Your message to both Claude and ChatGPT..."
+                rows="3"
+            ></textarea>
+            <button id="send-btn">Send <span class="hint">(Ctrl+Enter)</span></button>
+        </div>
+
+        <div class="responses">
+            <div class="panel claude">
+                <h3>Claude</h3>
+                <div id="claude-response" class="response-content">(waiting...)</div>
+                <div id="claude-tokens" class="tokens">tokens: --</div>
+            </div>
+
+            <div class="panel chatgpt">
+                <h3>ChatGPT</h3>
+                <div id="chatgpt-response" class="response-content">(waiting...)</div>
+                <div id="chatgpt-tokens" class="tokens">tokens: --</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
