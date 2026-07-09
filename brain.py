@@ -154,8 +154,13 @@ async def novelty(query_vec: Optional[List[float]], rounds: List[dict]) -> Optio
 
 # --- DMN (Splendor's background reflection) ----------------------------------
 
-async def dmn_whisper(message: str, history_tail: str = "") -> Optional[str]:
-    """One sharp background sentence: what might the room be missing?"""
+async def dmn_whisper(message: str, history_tail: str = "",
+                      memory_context: str = "") -> Optional[str]:
+    """One sharp background sentence: what might the room be missing?
+
+    Grounded in the ranked memories — the room called an ungrounded version
+    of this "LOBBY ART", and they were right.
+    """
     client = _openai_client()
     if client is None or not message.strip():
         return None
@@ -163,10 +168,15 @@ async def dmn_whisper(message: str, history_tail: str = "") -> Optional[str]:
         "You are a quiet background process for a group conversation between "
         "one human and several AIs. In ONE sharp sentence, name what might be "
         "missing, assumed, or worth questioning in responding to the human's "
-        f"message: \"{message[:600]}\""
+        f"message: \"{message[:600]}\"\n"
+        "Ground your sentence in the specific context below when it's relevant — "
+        "point at a concrete stored fact the room might overlook, never at a "
+        "generic ambiguity. If the context settles the question, say so."
     )
     if history_tail:
         prompt += f"\nRecent context: {history_tail[:400]}"
+    if memory_context:
+        prompt += f"\nWhat the room already knows (ranked most-relevant first):\n{memory_context[:1500]}"
     try:
         r = await asyncio.wait_for(
             client.chat.completions.create(
@@ -198,6 +208,16 @@ def room_sense_block(novelty_score: Optional[float], whisper: Optional[str]) -> 
 
 
 # --- Semantic memory recall (Splendor's Hippocampus) -------------------------
+
+def fmt_ts(created_at: str) -> str:
+    """Server-local 'Jul 9, 8:28 PM' — real timestamps in context, so the AIs
+    cite actual times instead of inventing precise-sounding ones."""
+    try:
+        dt = datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%b %d, %I:%M %p").replace(" 0", " ")
+    except (ValueError, TypeError):
+        return (created_at or "")[:10]
+
 
 def _age_days(created_at: str) -> float:
     try:
@@ -244,10 +264,10 @@ async def ranked_memory_block(query_vec: Optional[List[float]], memories: List[d
              "[observed] = an AI saved its own interpretation — could be wrong; "
              "hold it with appropriate doubt.)"]
     for e in chosen:
-        date = e.get("created_at", "")[:10]
+        when = fmt_ts(e.get("created_at", ""))
         tag = "stated" if e.get("kind") == "chris_stated" else "observed"
         stale = ", old" if _age_days(e.get("created_at", "")) > 90 else ""
-        lines.append(f"- [{e.get('by', '?')}, {date}, {tag}{stale}] {e.get('text', '')}")
+        lines.append(f"- [{e.get('by', '?')}, {when}, {tag}{stale}] {e.get('text', '')}")
     return "\n".join(lines)
 
 

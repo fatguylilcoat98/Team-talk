@@ -132,18 +132,19 @@ def context_block() -> str:
     """The notebook + pinned quotes sections injected into every context."""
     data = _load()
     lines = []
+    import brain
     pins = data["pins"][-CONTEXT_PINS:]
     if pins:
         lines.append("=== PINNED QUOTES (exact lines the room chose to keep) ===")
         for p in pins:
-            date = p.get("created_at", "")[:10]
-            lines.append(f'- "{p.get("text", "")}" (pinned by {p.get("by", "?")}, {date})')
+            when = brain.fmt_ts(p.get("created_at", ""))
+            lines.append(f'- "{p.get("text", "")}" (pinned by {p.get("by", "?")}, {when})')
     entries = data["entries"][-CONTEXT_ENTRIES:]
     if entries:
         if lines:
             lines.append("")
         lines.append("=== THE NOTEBOOK (shared scratchpad — everyone's own raw words) ===")
         for e in entries:
-            date = e.get("created_at", "")[:10]
-            lines.append(f"- [{e.get('by', '?')}, {date}] {e.get('text', '')}")
+            when = brain.fmt_ts(e.get("created_at", ""))
+            lines.append(f"- [{e.get('by', '?')}, {when}] {e.get('text', '')}")
     return "\n".join(lines)

@@ -136,13 +136,16 @@ async def chat(request: ChatRequest):
     # DMN reflection. All of it degrades to the pre-brain behavior when the
     # OpenAI key is missing or a call fails.
     query_vec = await brain.embed(message)
-    memory_task = brain.ranked_memory_block(query_vec, memory_store.list_memories())
-    episodes_task = brain.ranked_episodes(query_vec, episode_store.list_episodes(),
-                                          exclude_session=session["id"])
-    novelty_task = brain.novelty(query_vec, history)
-    dmn_task = brain.dmn_whisper(message, history[-1]["chris_message"] if history else "")
-    memory_block, cross_episodes, novelty_score, whisper = await asyncio.gather(
-        memory_task, episodes_task, novelty_task, dmn_task)
+    memory_block, cross_episodes, novelty_score = await asyncio.gather(
+        brain.ranked_memory_block(query_vec, memory_store.list_memories()),
+        brain.ranked_episodes(query_vec, episode_store.list_episodes(),
+                              exclude_session=session["id"]),
+        brain.novelty(query_vec, history))
+    # The whisper runs AFTER ranking so it can point at what the room already
+    # knows, instead of asking generic questions the memories answer.
+    whisper = await brain.dmn_whisper(
+        message, history[-1]["chris_message"] if history else "",
+        memory_context=memory_block)
 
     for block in (episode_store.episodes_block(cross_episodes),
                   notebook_store.context_block(),

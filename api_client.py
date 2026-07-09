@@ -37,6 +37,11 @@ OPENAI_NO_CREDITS_MSG = (
 # takes effect on the next message without restarting the server.
 _clients = {}
 
+# Models that proved to be reasoning models (burned a whole normal budget on
+# thinking and returned nothing). They start at the big budget from then on,
+# skipping the doomed first call that just wastes tokens.
+_reasoning_models = set()
+
 
 def anthropic_key() -> Optional[str]:
     return settings_store.resolve("anthropic_api_key", "ANTHROPIC_API_KEY")
@@ -177,16 +182,20 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
                 {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ]
+            budget = REASONING_MAX_TOKENS if p["model"] in _reasoning_models else MAX_TOKENS
             response = await client.chat.completions.create(
-                model=p["model"], max_tokens=MAX_TOKENS, messages=messages,
+                model=p["model"], max_tokens=budget, messages=messages,
             )
             choice = response.choices[0]
             text = choice.message.content or ""
             tokens = response.usage.completion_tokens if response.usage else 0
-            if not text.strip() and getattr(choice, "finish_reason", "") == "length":
+            if not text.strip() and getattr(choice, "finish_reason", "") == "length" \
+                    and budget < REASONING_MAX_TOKENS:
                 # Reasoning models (Muse Spark, DeepSeek R1, o-series) can burn
                 # the whole budget on internal thinking and get cut off before
-                # writing a single visible word. Retry once with real headroom.
+                # writing a single visible word. Retry once with real headroom —
+                # and remember, so future calls skip the doomed first attempt.
+                _reasoning_models.add(p["model"])
                 response = await client.chat.completions.create(
                     model=p["model"], max_tokens=REASONING_MAX_TOKENS, messages=messages,
                 )
