@@ -618,6 +618,12 @@ function renderLegend() {
         item.appendChild(document.createTextNode(p.name));
         legendDiv.appendChild(item);
     }
+    // The silent sixth chair: present, watching, never speaking
+    const dir = document.createElement('span');
+    dir.className = 'legend-item director-chair';
+    dir.title = 'The Director watches in silence — hit Director\'s Cut to wrap the session into shorts';
+    dir.innerHTML = '<span class="dot" style="background:#5a6478"></span>🎬 Director (watching)';
+    legendDiv.appendChild(dir);
 }
 
 // --- Settings ------------------------------------------------------------
@@ -1078,6 +1084,259 @@ notebookClearBtn.addEventListener('click', async () => {
     if (!confirm('Delete the ENTIRE notebook — every entry and every pinned quote?')) return;
     await fetch('/api/notebook', { method: 'DELETE' });
     renderNotebook();
+});
+
+// --- 🎬 Director's Cut --------------------------------------------------------
+
+const directorsBtn = document.getElementById('directors-btn');
+const directorsOverlay = document.getElementById('directors-overlay');
+const directorsClose = document.getElementById('directors-close');
+const directorsBody = document.getElementById('directors-body');
+const CATEGORY_LABELS = {
+    best_overall: '🏆 Best Overall',
+    funniest: '😂 Funniest',
+    breakthrough: '💡 Biggest Breakthrough',
+    best_roast: '🔥 Best Roast',
+    most_human: '❤️ Most Human Moment',
+};
+
+directorsBtn.addEventListener('click', async () => {
+    if (!currentSessionId) {
+        alert('Start a conversation first — the Director needs footage.');
+        return;
+    }
+    directorsOverlay.classList.remove('hidden');
+    directorsBody.innerHTML = '<p class="field-note">Checking the archive…</p>';
+    try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/directors_cut`);
+        const cut = await res.json();
+        renderDirectorsCut(cut);
+    } catch (err) {
+        directorsBody.innerHTML = `<p class="field-note">Could not load: ${err.message}</p>`;
+    }
+});
+directorsClose.addEventListener('click', () => directorsOverlay.classList.add('hidden'));
+directorsOverlay.addEventListener('click', (e) => {
+    if (e.target === directorsOverlay) directorsOverlay.classList.add('hidden');
+});
+
+function wrapButton(label) {
+    const btn = document.createElement('button');
+    btn.className = 'primary wrap-btn';
+    btn.textContent = label;
+    btn.addEventListener('click', async () => {
+        directorsBody.innerHTML =
+            '<p class="field-note director-working">🎬 The Director is reviewing the footage with Splendor… ' +
+            'marking moments, cutting clips. This takes a minute.</p>';
+        try {
+            const res = await fetch(
+                `/api/sessions/${encodeURIComponent(currentSessionId)}/directors_cut`,
+                { method: 'POST' });
+            const cut = await res.json();
+            if (!res.ok) throw new Error(cut.detail || `wrap failed (${res.status})`);
+            renderDirectorsCut(cut);
+        } catch (err) {
+            directorsBody.innerHTML = `<p class="field-note">The wrap failed: ${err.message}</p>`;
+            directorsBody.appendChild(wrapButton('🎬 Try the Wrap again'));
+        }
+    });
+    return btn;
+}
+
+function renderDirectorsCut(cut) {
+    directorsBody.innerHTML = '';
+    if (!cut || !(cut.clips || []).length) {
+        const p = document.createElement('p');
+        p.className = 'field-note';
+        p.textContent = (cut && (cut.moments || []).length)
+            ? 'The Director marked moments but no clips were cut yet.'
+            : 'No cut exists for this session yet.';
+        directorsBody.appendChild(p);
+        directorsBody.appendChild(wrapButton('🎬 Wrap — cut this session into shorts'));
+        return;
+    }
+    const meta = document.createElement('p');
+    meta.className = 'field-note';
+    meta.textContent = `Cut ${(cut.created_at || '').slice(0, 10)} · ${cut.rounds_reviewed || '?'} rounds reviewed · ${cut.moments.length} moments marked · ${cut.clips.length} clips`;
+    directorsBody.appendChild(meta);
+    for (const clip of cut.clips) directorsBody.appendChild(clipCard(clip));
+    directorsBody.appendChild(wrapButton('🎬 Re-cut the session'));
+}
+
+function clipCard(clip) {
+    const card = document.createElement('div');
+    card.className = 'clip-card';
+
+    const cat = document.createElement('div');
+    cat.className = 'clip-cat';
+    cat.textContent = CATEGORY_LABELS[clip.category] || clip.category;
+    card.appendChild(cat);
+
+    const title = document.createElement('h3');
+    title.className = 'clip-title';
+    title.textContent = clip.title;
+    card.appendChild(title);
+
+    const meta = document.createElement('div');
+    meta.className = 'clip-meta';
+    meta.textContent = `~${clip.duration_sec}s · score ${clip.score} · rounds ${clip.start_round}–${clip.end_round}`;
+    card.appendChild(meta);
+
+    const quote = document.createElement('blockquote');
+    quote.className = 'clip-quote';
+    quote.textContent = `“${clip.quote}”`;
+    card.appendChild(quote);
+
+    const why = document.createElement('p');
+    why.className = 'clip-why';
+    why.innerHTML = `<strong>🎬 Director:</strong> ${escapeText(clip.why_director)}`;
+    card.appendChild(why);
+
+    if (clip.splendor_take) {
+        const take = document.createElement('p');
+        take.className = 'clip-why';
+        take.innerHTML = `<strong>🕊️ Splendor:</strong> ${escapeText(clip.splendor_take)}`;
+        card.appendChild(take);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'clip-actions';
+
+    const preview = document.createElement('button');
+    preview.textContent = '▶ Preview';
+    preview.addEventListener('click', () => playClip(clip));
+    actions.appendChild(preview);
+
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = 'Export Script';
+    exportBtn.title = 'Download the clip as JSON — the input for video rendering';
+    exportBtn.addEventListener('click', () => {
+        const blob = new Blob([JSON.stringify(clip, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(clip.title || 'clip').replace(/[^\w]+/g, '-').slice(0, 50)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+    actions.appendChild(exportBtn);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = 'Copy Caption';
+    copyBtn.addEventListener('click', async () => {
+        const text = `${clip.caption}\n\n${(clip.hashtags || []).map((h) => '#' + h).join(' ')}`;
+        try {
+            await navigator.clipboard.writeText(text);
+            copyBtn.textContent = '✓ Copied';
+        } catch (e) {
+            prompt('Copy the caption:', text);
+        }
+        setTimeout(() => { copyBtn.textContent = 'Copy Caption'; }, 1500);
+    });
+    actions.appendChild(copyBtn);
+
+    card.appendChild(actions);
+    return card;
+}
+
+function escapeText(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+}
+
+// --- Vertical preview player (9:16, caption-first, story-style) --------------
+
+const clipPlayer = document.getElementById('clip-player');
+const clipStage = document.getElementById('clip-stage');
+const clipProgress = document.getElementById('clip-progress');
+const clipCloseBtn = document.getElementById('clip-close');
+let clipTimer = null;
+let clipFrames = [];
+let clipIndex = 0;
+
+function speakerColor(name) {
+    if (name === 'Chris') return '#e8b04b';
+    if (name === 'Director') return '#8a93a5';
+    if (name === 'Splendor') return '#e8d9b0';
+    const p = participantsCache.find((q) => q.name === name);
+    return (p && p.color) || '#93a0b8';
+}
+
+function clipToFrames(clip) {
+    const frames = [];
+    frames.push({ kind: 'hook', text: clip.hook || clip.title });
+    for (const ex of clip.excerpts || []) {
+        frames.push({ kind: 'excerpt', speaker: ex.speaker, text: ex.text });
+    }
+    for (const d of clip.dialogue || []) {
+        frames.push({ kind: 'commentary', speaker: d.speaker, text: d.line });
+    }
+    frames.push({ kind: 'end', text: clip.end_line || 'What would you have said?' });
+    return frames;
+}
+
+function frameDuration(f) {
+    return Math.max(2000, Math.min(5000, 1400 + (f.text || '').length * 45));
+}
+
+function playClip(clip) {
+    clipFrames = clipToFrames(clip);
+    clipIndex = 0;
+    clipPlayer.classList.remove('hidden');
+    clipProgress.innerHTML = '';
+    for (let i = 0; i < clipFrames.length; i++) {
+        const seg = document.createElement('span');
+        clipProgress.appendChild(seg);
+    }
+    showFrame();
+}
+
+function showFrame() {
+    clearTimeout(clipTimer);
+    if (clipIndex < 0) clipIndex = 0;
+    if (clipIndex >= clipFrames.length) { closeClip(); return; }
+    const f = clipFrames[clipIndex];
+    [...clipProgress.children].forEach((seg, i) => {
+        seg.className = i < clipIndex ? 'done' : (i === clipIndex ? 'active' : '');
+    });
+    clipStage.innerHTML = '';
+    const inner = document.createElement('div');
+    inner.className = `clip-frame clip-${f.kind}`;
+    if (f.speaker) {
+        const sp = document.createElement('div');
+        sp.className = 'clip-speaker';
+        sp.style.color = speakerColor(f.speaker);
+        sp.textContent = f.kind === 'commentary'
+            ? (f.speaker === 'Director' ? '🎬 DIRECTOR' : '🕊️ SPLENDOR')
+            : f.speaker.toUpperCase();
+        inner.appendChild(sp);
+    }
+    const tx = document.createElement('div');
+    tx.className = 'clip-text';
+    tx.textContent = f.text;
+    inner.appendChild(tx);
+    if (f.kind === 'end') {
+        const brand = document.createElement('div');
+        brand.className = 'clip-brand';
+        brand.textContent = 'made with Team Talk 🍻';
+        inner.appendChild(brand);
+    }
+    clipStage.appendChild(inner);
+    clipTimer = setTimeout(() => { clipIndex++; showFrame(); }, frameDuration(f));
+}
+
+function closeClip() {
+    clearTimeout(clipTimer);
+    clipPlayer.classList.add('hidden');
+}
+
+clipCloseBtn.addEventListener('click', closeClip);
+clipStage.addEventListener('click', (e) => {
+    const rect = clipStage.getBoundingClientRect();
+    if (e.clientX - rect.left < rect.width / 3) clipIndex = Math.max(0, clipIndex - 1);
+    else clipIndex++;
+    showFrame();
 });
 
 // --- Stale-server detection ------------------------------------------------
