@@ -817,3 +817,30 @@ button.danger:hover {
     font-size: 0.78rem;
     font-style: italic;
 }
+
+/* --- Voice mode --- */
+.hidden {
+    display: none !important;
+}
+
+.mic-btn.rec {
+    border-color: var(--danger);
+    color: var(--danger);
+    animation: mic-pulse 1.2s infinite;
+}
+
+@keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(208, 85, 85, 0.5); }
+    50% { box-shadow: 0 0 0 7px rgba(208, 85, 85, 0); }
+}
+
+.splendor-recap {
+    background: rgba(232, 176, 75, 0.08);
+    border: 1px dashed rgba(232, 176, 75, 0.4);
+    border-radius: 10px;
+    padding: 10px 14px;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    font-style: italic;
+    white-space: pre-wrap;
+}

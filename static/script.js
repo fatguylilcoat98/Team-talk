@@ -112,6 +112,93 @@ awardsToggle.addEventListener('change', () =>
 splendorToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-splendor', splendorToggle.checked ? 'on' : 'off'));
 
+// --- Voice mode: talk to the room, hear Splendor recap the crew -------------
+
+const voiceToggle = document.getElementById('voice-toggle');
+const micBtn = document.getElementById('mic-btn');
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+voiceToggle.checked = localStorage.getItem('teamtalk-voice') === 'on';
+
+function updateVoiceUI() {
+    micBtn.classList.toggle('hidden', !(voiceToggle.checked && SpeechRec));
+}
+
+voiceToggle.addEventListener('change', () => {
+    localStorage.setItem('teamtalk-voice', voiceToggle.checked ? 'on' : 'off');
+    updateVoiceUI();
+    if (voiceToggle.checked && !SpeechRec) {
+        alert('Splendor will speak her recaps out loud — but voice INPUT needs HTTPS, ' +
+              'which this address doesn\'t have.\n\nEasiest fix (you have Tailscale) — run on the server:\n' +
+              'sudo tailscale serve --bg --https=443 http://localhost:5001\n\n' +
+              'then open the https://…ts.net address it prints.');
+    }
+});
+updateVoiceUI();
+
+let recog = null;
+let micActive = false;
+micBtn.addEventListener('click', () => {
+    if (micActive && recog) { recog.stop(); return; }
+    recog = new SpeechRec();
+    recog.lang = navigator.language || 'en-US';
+    recog.interimResults = true;
+    let finalText = '';
+    recog.onresult = (e) => {
+        let interim = '';
+        for (const res of e.results) {
+            if (res.isFinal) finalText += res[0].transcript;
+            else interim += res[0].transcript;
+        }
+        chrisInput.value = (finalText + interim).trim();
+    };
+    recog.onerror = (e) => {
+        micActive = false;
+        micBtn.classList.remove('rec');
+        if (e.error !== 'no-speech' && e.error !== 'aborted') {
+            alert(`Mic error: ${e.error}`);
+        }
+    };
+    recog.onend = () => {
+        micActive = false;
+        micBtn.classList.remove('rec');
+        if (chrisInput.value.trim()) sendMessage();
+    };
+    recog.start();
+    micActive = true;
+    micBtn.classList.add('rec');
+});
+
+function browserSpeak(text) {
+    try {
+        const u = new SpeechSynthesisUtterance(text);
+        u.rate = 1.05;
+        speechSynthesis.speak(u);
+    } catch (e) { /* no browser voice — text recap is still on screen */ }
+}
+
+async function speakRecap(round) {
+    try {
+        const res = await fetch('/api/voice/recap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentSessionId, round: round.round }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const el = document.createElement('div');
+        el.className = 'splendor-recap';
+        el.textContent = `🕊️ ${data.text}`;
+        historyDiv.appendChild(el);
+        historyDiv.scrollTop = historyDiv.scrollHeight;
+        if (data.audio_b64) {
+            new Audio(`data:audio/mpeg;base64,${data.audio_b64}`).play()
+                .catch(() => browserSpeak(data.text));
+        } else {
+            browserSpeak(data.text);
+        }
+    } catch (e) { /* recap is a bonus — never break the round over it */ }
+}
+
 const MODE_LABELS = {
     collab: '🤝 collaborate',
     hard_truth: '💊 hard truth',
@@ -282,6 +369,7 @@ async function sendMessage() {
         pending.replaceWith(buildRound(data));
         historyDiv.scrollTop = historyDiv.scrollHeight;
 
+        if (voiceToggle.checked && data.round) speakRecap(data);
         if (isNewSession) await refreshSessions();
     } catch (err) {
         pending.replaceWith(buildRound({

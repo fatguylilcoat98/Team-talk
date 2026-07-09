@@ -438,6 +438,51 @@ async def clear_memory():
     return {"status": "cleared", "removed": removed}
 
 
+# --- Voice mode: Splendor speaks the room ------------------------------------
+
+class RecapRequest(BaseModel):
+    session_id: str
+    round: int
+
+
+@app.post("/api/voice/recap")
+async def voice_recap(req: RecapRequest):
+    """Splendor's spoken synthesis of one round: text + (if possible) audio.
+
+    Audio comes from OpenAI TTS when the key allows; otherwise the client
+    falls back to the browser's built-in voice using the text alone.
+    """
+    if not session_manager.valid_id(req.session_id):
+        raise HTTPException(status_code=400, detail="Invalid session_id")
+    session = await session_manager.load_session(req.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    round_data = next((r for r in session["rounds"] if r.get("round") == req.round), None)
+    if round_data is None:
+        raise HTTPException(status_code=404, detail="Round not found")
+
+    text = await splendor.recap(round_data)
+    if not text:
+        raise HTTPException(status_code=503, detail="Splendor's recap is unavailable — check the API keys in Settings.")
+
+    audio_b64 = None
+    key = api_client.openai_key()
+    if key:
+        try:
+            client = api_client._get_client({"provider": "openai"}, key)
+            resp = await client.audio.speech.create(
+                model=os.getenv("SPLENDOR_TTS_MODEL", "gpt-4o-mini-tts"),
+                voice=os.getenv("SPLENDOR_VOICE", "nova"),
+                input=text[:3000],
+            )
+            data = resp.content if hasattr(resp, "content") else await resp.aread()
+            audio_b64 = base64.standard_b64encode(data).decode("ascii")
+        except Exception as e:
+            print(f"[VOICE] TTS failed, client will use the browser voice: {e}")
+
+    return {"text": text, "audio_b64": audio_b64}
+
+
 # --- The Notebook (shared scratchpad + pinned quotes) -----------------------
 
 class NotebookAdd(BaseModel):
