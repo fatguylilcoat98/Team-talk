@@ -350,7 +350,14 @@ function aiBubble(resp, allNames = []) {
     const color = resp.color || '#93a0b8';
     el.style.borderColor = hexWithAlpha(color, 0.55);
     el.style.background = hexWithAlpha(color, 0.09);
-    el.appendChild(speakerEl(color, resp.name));
+    const speaker = speakerEl(color, resp.name);
+    if (resp.persona) {
+        const badge = document.createElement('span');
+        badge.className = 'persona-badge';
+        badge.textContent = `🎭 ${resp.persona}`;
+        speaker.appendChild(badge);
+    }
+    el.appendChild(speaker);
 
     const targets = isError ? [] : replyTargets(resp, allNames);
     if (targets.length) {
@@ -511,6 +518,11 @@ function participantCard(p = {}, keyHint = null) {
     const keyInput = pInput('p-key', 'password', p.prefill_key || '', hint);
     card.appendChild(pField('API Key', keyInput));
 
+    // The fun part: give it a character
+    const personaInput = pInput('p-persona', 'text', p.persona || '',
+        'e.g. a pirate who doesn\'t give a shit / Jack Black energy');
+    card.appendChild(pField('Personality (optional)', personaInput));
+
     // Everything else lives behind Advanced
     const adv = document.createElement('details');
     adv.className = 'p-advanced';
@@ -589,6 +601,7 @@ function collectParticipants() {
             model: card.querySelector('.p-model').value.trim(),
             api_key: card.querySelector('.p-key').value.trim() || null,
             base_url: card.querySelector('.p-url').value.trim() || null,
+            persona: card.querySelector('.p-persona').value.trim() || null,
         });
     }
     return roster;

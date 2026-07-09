@@ -40,7 +40,7 @@ PALETTE = [
 
 MAX_PARTICIPANTS = 6
 
-PARTICIPANT_FIELDS = {"id", "name", "provider", "model", "api_key", "base_url", "color"}
+PARTICIPANT_FIELDS = {"id", "name", "provider", "model", "api_key", "base_url", "color", "persona"}
 PROVIDERS = {"anthropic", "openai"}
 
 
@@ -196,6 +196,9 @@ def sanitize_participants(incoming: List[dict]) -> List[dict]:
         seen_ids.add(pid)
 
         clean = {"id": pid, "name": name, "provider": provider, "model": model}
+        persona = str(p.get("persona") or "").strip()[:300]
+        if persona:
+            clean["persona"] = persona
         base_url = str(p.get("base_url") or "").strip()
         if base_url:
             clean["base_url"] = base_url

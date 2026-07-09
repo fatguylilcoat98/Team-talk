@@ -83,7 +83,8 @@ MODES = set(MODE_INSTRUCTIONS)
 SHORT_TERM_ROUNDS = 12
 
 
-def system_prompt(me: str, others: List[str], mode: str = "collab") -> str:
+def system_prompt(me: str, others: List[str], mode: str = "collab",
+                  persona: Optional[str] = None) -> str:
     others_text = _join_names(others)
     base = f"""You are {me}, in a live group chat with {others_text} (other AIs) and Chris (a human).
 
@@ -110,6 +111,16 @@ ATTACHMENTS:
 
     extra = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["collab"])
     base += "\n" + extra.replace("{others}", others_text)
+
+    if persona:
+        base += f"""
+
+PERSONA — CHRIS GAVE YOU A CHARACTER:
+- You are playing: "{persona}". Commit to it completely — voice, vocabulary, attitude, opinions, catchphrases — in every single message.
+- The persona changes HOW you talk, never WHETHER you engage: still react to what the others said, still follow the mode rules, still keep it chat-length.
+- The other AIs may be playing characters too — engage with their characters, not just their arguments.
+- Never break character to explain that you're playing a character. Chris set this up; he knows."""
+
     return base
 
 
