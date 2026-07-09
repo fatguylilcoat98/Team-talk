@@ -214,7 +214,16 @@ async function sendMessage() {
 
 // --- Rendering -----------------------------------------------------------
 
-const MODE_LABELS = { debate: '⚔️ debate', ai_only: '🤖 AIs only' };
+const MODE_LABELS = {
+    debate: '⚔️ debate',
+    ai_only: '🤖 AIs only',
+    devils_advocate: "😈 devil's advocate",
+    steelman: '🛡️ steelman',
+    questions: '❓ questions',
+    proof: '📋 proof',
+    brainstorm: '💡 brainstorm',
+    consensus: '🤝 consensus',
+};
 
 function removeEmptyHint() {
     const hint = historyDiv.querySelector('.empty-hint');
