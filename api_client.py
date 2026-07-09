@@ -134,6 +134,19 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
         return {"text": _rate_limit_message(name, e), "tokens": 0, "ok": False}
     except (anthropic.AuthenticationError, openai.AuthenticationError):
         return {"text": f"Error: {name}'s API key was rejected (invalid or revoked).", "tokens": 0, "ok": False}
+    except (anthropic.BadRequestError, openai.BadRequestError) as e:
+        msg = str(getattr(e, "message", e))
+        if images and ("image" in msg.lower() or "vision" in msg.lower()):
+            return {
+                "text": (
+                    f"Error: {name}'s model \"{p.get('model')}\" can't see images. The "
+                    f"other AIs still saw the picture — to fix {name}, open Settings → "
+                    f"{name} → Advanced and switch to a vision model (e.g. gpt-4o-mini "
+                    f"for OpenAI)."
+                ),
+                "tokens": 0, "ok": False,
+            }
+        return {"text": f"Error: {name}'s API rejected the request (400): {msg}", "tokens": 0, "ok": False}
     except (anthropic.NotFoundError, openai.NotFoundError) as e:
         # Providers retire models — the most common 404 by far
         return {
