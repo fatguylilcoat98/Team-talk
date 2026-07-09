@@ -134,6 +134,16 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
         return {"text": _rate_limit_message(name, e), "tokens": 0, "ok": False}
     except (anthropic.AuthenticationError, openai.AuthenticationError):
         return {"text": f"Error: {name}'s API key was rejected (invalid or revoked).", "tokens": 0, "ok": False}
+    except (anthropic.NotFoundError, openai.NotFoundError) as e:
+        # Providers retire models — the most common 404 by far
+        return {
+            "text": (
+                f"Error: {name}'s model \"{p.get('model')}\" was not found — the provider "
+                f"may have retired it. Open Settings → {name} → Advanced and update the "
+                f"Model name. (Provider said: {getattr(e, 'message', e)})"
+            ),
+            "tokens": 0, "ok": False,
+        }
     except (anthropic.APIStatusError, openai.APIStatusError) as e:
         return {"text": f"Error: {name}'s API returned an error ({e.status_code}): {getattr(e, 'message', e)}", "tokens": 0, "ok": False}
     except (anthropic.APIConnectionError, openai.APIConnectionError):
