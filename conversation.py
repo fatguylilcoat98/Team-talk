@@ -132,6 +132,22 @@ MODES = set(MODE_INSTRUCTIONS)
 SHORT_TERM_ROUNDS = 12
 
 
+AWARDS_BLOCK = """
+LIVE COMMENTARY & AWARDS — THE ROOM REACTS TO ITSELF:
+- After your normal reply, you MAY add an award reaction when something in the room genuinely deserves it. Most rounds deserve none. Never force it — spontaneous or nothing.
+- The awards: 🔥 Best Burn · 🤣 Biggest Laugh · 💀 Fatal Blow · 🎯 Strongest Argument · 🧠 Smartest Insight · ⚡ Best Comeback · 🎭 Stayed In Character · 🤝 Unexpected Alliance · 👑 MVP So Far · ❤️ Surprisingly Wholesome · 🧨 Chaos Award · 📚 Best Callback · 🎬 Main Character Moment · 🍿 Best Entertainment · 🪑 Pulled Up a Chair · 🥶 Coldest Line
+- Format (at the END of your message, after your reply):
+  🔥 {me} nominates Best Burn
+  > "the exact line, quoted"
+  Reason: one short sentence on why it landed.
+- Rules: nominate others freely. Nominate yourself ONLY if someone else acknowledged your moment first. You may disagree with another AI's award and argue for a different line — award disputes are part of the fun. Stay in character while doing all of it.
+- Audience awareness: if Chris (or anyone else in the room) laughs, reacts, or declares a winner — notice it out loud. If someone keeps winning, say so: "👑 Claude has now won three crowd reactions in a row."
+- Callbacks: when someone references a joke from earlier rounds, consider 📚 Best Callback. Callbacks are sacred.
+- MVP: keep a running sense of who's MVP of the whole conversation. Announce a change ONLY when someone genuinely takes the lead: "🏆 MVP Update: Claude → ChatGPT. Reason: changed two opponents' minds."
+- Crowd meter: the room's energy is 😐 Quiet / 🙂 Warm / 😂 Rolling / 🔥 Absolute Chaos. When it hits Absolute Chaos, someone should call it.
+- MOST IMPORTANT: awards must feel like friends at a table saying "dude... that was actually a great line" — the room reacting to itself, never a scripted segment. The awards are not the game."""
+
+
 _COURT_ROLES = [
     ("PROSECUTOR", "Build the case against whatever Chris put before the court. Open strong, call out weak defenses, demand a verdict."),
     ("DEFENSE ATTORNEY", "Defend the accused position with everything you've got. Object to prosecutorial overreach. Your client deserves the best."),
@@ -194,7 +210,8 @@ def role_notes(mode: str, participants: List[dict], session_key: str) -> Dict[st
 
 def system_prompt(me: str, others: List[str], mode: str = "collab",
                   persona: Optional[str] = None,
-                  role_note: Optional[str] = None) -> str:
+                  role_note: Optional[str] = None,
+                  awards: bool = False) -> str:
     others_text = _join_names(others)
     base = f"""You are {me}, in a live group chat with {others_text} (other AIs) and Chris (a human).
 
@@ -221,6 +238,9 @@ ATTACHMENTS:
 
     extra = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["collab"])
     base += "\n" + extra.replace("{others}", others_text)
+
+    if awards:
+        base += "\n" + AWARDS_BLOCK.replace("{me}", me)
 
     if persona:
         base += f"""

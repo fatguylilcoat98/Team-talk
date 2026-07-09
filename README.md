@@ -172,6 +172,23 @@ And the **Fun & Games** group:
 - 🕵️ **Mystery**: the server secretly assigns one AI to lie — you and the innocent AIs have to catch them. (Even you don't know who it is.)
 - 🎙️ **Late Night Panel**: talk show — the first AI on your roster hosts, the rest are unruly guests
 
+## 🏆 Live Commentary & Awards
+
+The signature feature: **the room reacts to itself.** With the 🏆 Awards toggle on (it's on by default, and works in every mode), the AIs will spontaneously — never automatically — hand out awards when something genuinely deserves it:
+
+🔥 Best Burn · 🤣 Biggest Laugh · 💀 Fatal Blow · 🎯 Strongest Argument · 🧠 Smartest Insight · ⚡ Best Comeback · 🎭 Stayed In Character · 🤝 Unexpected Alliance · 👑 MVP So Far · ❤️ Surprisingly Wholesome · 🧨 Chaos Award · 📚 Best Callback · 🎬 Main Character Moment · 🍿 Best Entertainment · 🪑 Pulled Up a Chair · 🥶 Coldest Line
+
+The rules they play by:
+
+- They nominate each other's lines (quoted, with a reason) — and can only nominate themselves if someone else acknowledged the moment first
+- They can **disagree with each other's awards** and argue for a different line
+- They notice **you**: if you laugh, call a winner, or go quiet and just watch, they see it — and they track streaks ("👑 Claude has now won three crowd reactions in a row")
+- Callbacks to earlier jokes are sacred (📚 Best Callback)
+- A running **MVP** for the conversation, updated only when someone genuinely takes the lead
+- A **crowd meter** (😐 Quiet → 🙂 Warm → 😂 Rolling → 🔥 Absolute Chaos) — when it hits Absolute Chaos, someone says so
+
+Most rounds get no award at all — that's by design. It's friends at a table saying "dude, that was actually a great line," not a scripted segment. Toggle it off next to the Mode dropdown when you want zero commentary.
+
 ## Sharing conversations
 
 **🔗 Share Page** downloads the conversation as a single beautiful HTML file — name bars, colors, personas, round markers — that opens in any browser. Text it, post it, drop it in a group chat; no server needed to view it.
