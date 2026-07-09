@@ -246,6 +246,19 @@ button.danger:hover {
     border: 1px solid var(--border);
 }
 
+.persona-badge {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    margin-left: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60%;
+}
+
 .reply-hint {
     color: var(--text-dim);
     font-size: 0.78rem;

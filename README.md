@@ -137,6 +137,16 @@ The AIs have **long-term memory that survives across sessions**, stored on your 
 - **Short-term memory:** the last 12 rounds of the current conversation are always included verbatim; older rounds age out, and whatever mattered survives via long-term memory.
 - **Managing it:** tap **🧠 Memory** in the header to see everything they've saved, delete individual memories, or hit "Forget Everything."
 
+## Personalities 🎭
+
+Every AI has an optional **Personality** box on its card in Settings. Whatever you type, it plays — completely in character, every message, while still debating/collaborating per the mode:
+
+- *ChatGPT → "a pirate who doesn't give a shit"*
+- *Claude → "Donald Trump"*
+- *Grok → "Jack Black energy, all caps enthusiasm"*
+
+The character shows as a 🎭 badge next to the AI's name in the chat. Combine with ⚔️ Debate mode and a dumb question for maximum entertainment. Clear the box to get the normal AI back.
+
 ## Modes and turn-taking
 
 Two dropdowns above the message box:

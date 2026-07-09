@@ -69,6 +69,7 @@ class ParticipantUpdate(BaseModel):
     api_key: Optional[str] = None  # blank = keep the saved key for this id
     base_url: Optional[str] = None
     color: Optional[str] = None
+    persona: Optional[str] = None  # character to play, e.g. "a pirate who doesn't give a shit"
 
 
 class SettingsUpdate(BaseModel):
@@ -130,7 +131,7 @@ async def chat(request: ChatRequest):
     def prompt_for(p, so_far=None):
         others = [n for n in names if n != p["name"]]
         return (
-            system_prompt(p["name"], others, mode),
+            system_prompt(p["name"], others, mode, persona=p.get("persona")),
             build_context(history, message, p["name"], others, mode, so_far,
                           memory_block=memory_block, attachments_block=attachments_block),
         )
@@ -193,13 +194,16 @@ async def chat(request: ChatRequest):
 
 
 def _response_entry(p: dict, result: dict) -> dict:
-    return {
+    entry = {
         "id": p["id"],
         "name": p["name"],
         "text": result["text"],
         "tokens": result["tokens"],
         "color": p.get("color", "#93a0b8"),
     }
+    if p.get("persona"):
+        entry["persona"] = p["persona"]
+    return entry
 
 
 # --- Settings --------------------------------------------------------------
@@ -215,6 +219,7 @@ def _public_participants() -> List[dict]:
             "model": p.get("model", ""),
             "base_url": p.get("base_url", ""),
             "color": p.get("color", "#93a0b8"),
+            "persona": p.get("persona", ""),
             "api_key_masked": settings_store.mask_key(p.get("api_key")),
             "uses_shared_key": not p.get("api_key"),
         })
