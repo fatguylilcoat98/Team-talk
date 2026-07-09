@@ -148,6 +148,10 @@ Every AI has an optional **Personality** box on its card in Settings. Whatever y
 
 The character shows as a 🎭 badge next to the AI's name in the chat. Combine with ⚔️ Debate mode and a dumb question for maximum entertainment. Clear the box to get the normal AI back.
 
+## 🎬 Director's Cut
+
+A silent Director occupies the sixth chair — visually present, never speaking. When a session's worth watching, hit **🎬 Director's Cut → Wrap**: the Director reviews the footage with Splendor and cuts the best moments into 30-second vertical shorts. Each clip card gives you a title, the key quote, the Director's evidence, Splendor's interpretation, a story-style 9:16 preview you can screen-record, an exportable JSON script (the input for real video rendering later), and a copy-ready caption with hashtags. Cuts persist in `directors_cut/` on your server (gitignored).
+
 ## Modes and turn-taking
 
 Two dropdowns above the message box:

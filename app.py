@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 import api_client
 import brain
+import director
 import episode_store
 import file_store
 import memory_store
@@ -520,6 +521,33 @@ async def delete_notebook_pin(pin_id: str):
 async def clear_notebook():
     removed = notebook_store.clear()
     return {"status": "cleared", "removed": removed}
+
+
+# --- 🎬 Director's Cut --------------------------------------------------------
+
+@app.post("/api/sessions/{session_id}/directors_cut")
+async def wrap_directors_cut(session_id: str):
+    """The Wrap: the Director reviews the session and cuts the shorts."""
+    session = await session_manager.load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.get("rounds"):
+        raise HTTPException(status_code=400, detail="Nothing to cut — the session has no rounds yet.")
+    cut = await director.wrap_session(session)
+    if not cut["moments"]:
+        raise HTTPException(
+            status_code=503,
+            detail="The Director couldn't review the footage — check the API keys in Settings, or the session may be too quiet for clips.",
+        )
+    return cut
+
+
+@app.get("/api/sessions/{session_id}/directors_cut")
+async def get_directors_cut(session_id: str):
+    if not session_manager.valid_id(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session_id")
+    cut = director.load_cut(session_id)
+    return cut if cut else {"session_id": session_id, "moments": [], "clips": []}
 
 
 # --- Sessions ---------------------------------------------------------------

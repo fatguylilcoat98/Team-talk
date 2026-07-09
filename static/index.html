@@ -25,6 +25,7 @@
                 <button id="delete-btn" class="danger" title="Delete this session">Delete Session</button>
                 <button id="memory-btn" title="What the AIs remember across sessions">&#129504; Memory</button>
                 <button id="notebook-btn" title="The room's shared scratchpad — raw notes and pinned quotes">&#128211; Notebook</button>
+                <button id="directors-btn" title="The Director cuts this session into 30-second shorts">&#127916; Director's Cut</button>
                 <button id="settings-btn" title="API keys and models">&#9881; Settings</button>
             </div>
         </header>
@@ -141,6 +142,25 @@
             <div class="modal-actions">
                 <button id="notebook-clear-btn" class="danger">Clear Notebook &amp; Pins</button>
             </div>
+        </div>
+    </div>
+
+    <div id="directors-overlay" class="overlay hidden">
+        <div class="modal directors-modal">
+            <div class="modal-header">
+                <h2>&#127916; Director's Cut</h2>
+                <button id="directors-close" class="close-btn" title="Close">&times;</button>
+            </div>
+            <p class="field-note">The Director watched this session in silence. Wrap it, and he'll review the footage with Splendor and cut the best moments into 30-second shorts — scripts, captions, and a vertical preview, ready to post.</p>
+            <div id="directors-body"></div>
+        </div>
+    </div>
+
+    <div id="clip-player" class="clip-player hidden">
+        <div class="clip-stage-wrap">
+            <div class="clip-progress" id="clip-progress"></div>
+            <div class="clip-stage" id="clip-stage"></div>
+            <button id="clip-close" class="clip-close" title="Close">&times;</button>
         </div>
     </div>
 
