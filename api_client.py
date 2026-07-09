@@ -23,6 +23,9 @@ from openai import AsyncOpenAI
 import settings_store
 
 MAX_TOKENS = int(os.getenv("MAX_TOKENS_CLAUDE", os.getenv("MAX_TOKENS", "2000")))
+# Retry budget when a reasoning model burns all of MAX_TOKENS thinking and
+# emits no visible text (Muse Spark, DeepSeek R1, o-series, ...).
+REASONING_MAX_TOKENS = int(os.getenv("MAX_TOKENS_REASONING", "8000"))
 API_TIMEOUT = float(os.getenv("API_TIMEOUT", "30"))
 
 OPENAI_NO_CREDITS_MSG = (
@@ -170,16 +173,35 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
                 content.append({"type": "text", "text": prompt})
             else:
                 content = prompt
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": content},
+            ]
             response = await client.chat.completions.create(
-                model=p["model"],
-                max_tokens=MAX_TOKENS,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": content},
-                ],
+                model=p["model"], max_tokens=MAX_TOKENS, messages=messages,
             )
-            text = response.choices[0].message.content or ""
+            choice = response.choices[0]
+            text = choice.message.content or ""
             tokens = response.usage.completion_tokens if response.usage else 0
+            if not text.strip() and getattr(choice, "finish_reason", "") == "length":
+                # Reasoning models (Muse Spark, DeepSeek R1, o-series) can burn
+                # the whole budget on internal thinking and get cut off before
+                # writing a single visible word. Retry once with real headroom.
+                response = await client.chat.completions.create(
+                    model=p["model"], max_tokens=REASONING_MAX_TOKENS, messages=messages,
+                )
+                choice = response.choices[0]
+                text = choice.message.content or ""
+                tokens += response.usage.completion_tokens if response.usage else 0
+        if not text.strip():
+            return {
+                "text": (
+                    f"Error: {name} returned an empty reply — its model likely spent the "
+                    f"whole token budget on internal reasoning. Try again, or switch "
+                    f"{name} to a non-reasoning model in Settings → {name} → Advanced."
+                ),
+                "tokens": tokens, "ok": False,
+            }
         return {"text": text, "tokens": tokens, "ok": True}
     except (anthropic.RateLimitError, openai.RateLimitError) as e:
         return {"text": _rate_limit_message(name, e), "tokens": 0, "ok": False}
