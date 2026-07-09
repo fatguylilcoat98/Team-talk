@@ -117,9 +117,18 @@
 
             <div class="participants-section">
                 <h3>Your AIs</h3>
-                <p class="field-note">Each AI uses the shared key above for its provider unless it has its own key. Add Grok, Gemini, DeepSeek, or a local Ollama with an OpenAI-compatible Base URL + that provider's key.</p>
+                <p class="field-note">Pick an AI, paste its key, Save. That's it. (Claude and ChatGPT can use the shared keys above instead.)</p>
                 <div id="participants-list"></div>
-                <button id="add-ai-btn" type="button">+ Add AI</button>
+                <select id="add-ai-select">
+                    <option value="" selected disabled>+ Add AI…</option>
+                    <option value="claude">Claude</option>
+                    <option value="chatgpt">ChatGPT</option>
+                    <option value="grok">Grok (xAI)</option>
+                    <option value="gemini">Gemini (Google)</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="ollama">Ollama (local, free)</option>
+                    <option value="custom">Custom…</option>
+                </select>
             </div>
 
             <details class="advanced">

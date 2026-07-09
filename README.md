@@ -161,18 +161,11 @@ You can switch modes mid-conversation — each message uses whatever mode is sel
 
 ## Adding more AIs
 
-Settings → **Your AIs** → **+ Add AI**. Any Anthropic model or any OpenAI-compatible API works. Each AI gets its own color automatically. Examples:
+Settings → **Your AIs** → **+ Add AI…** → pick one → paste its key → Save. Done.
 
-| AI | Provider | Base URL | Key |
-|---|---|---|---|
-| Claude | Anthropic | *(leave blank)* | shared Anthropic key |
-| ChatGPT | OpenAI-compatible | *(leave blank)* | shared OpenAI key |
-| Grok | OpenAI-compatible | `https://api.x.ai/v1` | your xAI key |
-| Gemini | OpenAI-compatible | `https://generativelanguage.googleapis.com/v1beta/openai/` | your Google AI key |
-| DeepSeek | OpenAI-compatible | `https://api.deepseek.com/v1` | your DeepSeek key |
-| Local Ollama | OpenAI-compatible | `http://localhost:11434/v1` | `ollama` (any text) |
+The picker knows Claude, ChatGPT, Grok, Gemini, DeepSeek, and local Ollama — model and endpoint are prefilled with the cheapest sensible defaults, so the key is the only thing you type. (Ollama needs no key at all.) Where to get keys: Grok → console.x.ai · Gemini → aistudio.google.com · DeepSeek → platform.deepseek.com.
 
-Up to 6 AIs. **Test AIs** checks every one separately. Old two-AI sessions still open fine.
+Each AI gets its own color automatically. Anything unusual (different model, custom endpoint) lives under the card's "Advanced" — you'll probably never open it. Up to 6 AIs; **Test AIs** checks every one separately.
 
 **How keys are stored:**
 

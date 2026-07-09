@@ -261,16 +261,17 @@ function buildRound(round, pending = false) {
         let label = `Round ${round.round}`;
         if (MODE_LABELS[round.mode]) label += ` · ${MODE_LABELS[round.mode]}`;
         if (round.turn_style === 'sequential') label += ' · 🔁';
+        if ((round.responses || []).length > 2) label += ` · ${round.responses.length} AIs`;
         marker.textContent = label;
         roundEl.appendChild(marker);
     }
 
-    // Chris — right side, gold
+    // Chris — full-width gold block at the top of the round
     const chrisRow = document.createElement('div');
     chrisRow.className = 'chris-row';
     const chrisBubble = document.createElement('div');
     chrisBubble.className = 'bubble chris-bubble';
-    chrisBubble.appendChild(speakerEl('#e8b04b', 'Chris'));
+    chrisBubble.appendChild(speakerEl('#e8b04b', 'Chris (you)'));
     const chrisText = document.createElement('div');
     chrisText.className = 'bubble-text';
     chrisText.textContent = round.chris_message;
@@ -298,20 +299,36 @@ function buildRound(round, pending = false) {
     chrisRow.appendChild(chrisBubble);
     roundEl.appendChild(chrisRow);
 
-    // AI replies — left side, each clearly named and colored
-    const pair = document.createElement('div');
-    pair.className = 'ai-pair';
+    // AI replies — stacked full-width blocks, each clearly named and colored.
+    // Stacking (not columns) scales to any number of AIs.
+    const stack = document.createElement('div');
+    stack.className = 'ai-stack';
     if (pending) {
         const roster = participantsCache.length
             ? participantsCache
             : [{ id: 'ai1', name: 'AI', color: '#93a0b8' }];
-        for (const p of roster) pair.appendChild(typingBubble(p));
+        for (const p of roster) stack.appendChild(typingBubble(p));
     } else {
-        for (const resp of round.responses || []) pair.appendChild(aiBubble(resp));
+        const names = (round.responses || []).map((r) => r.name);
+        for (const resp of round.responses || []) {
+            stack.appendChild(aiBubble(resp, names));
+        }
     }
-    roundEl.appendChild(pair);
+    roundEl.appendChild(stack);
 
     return roundEl;
+}
+
+// Who is this reply engaging with? Look for other participants' names
+// early in the message and show a small "➤ to ..." thread hint.
+function replyTargets(resp, allNames) {
+    const head = (resp.text || '').slice(0, 250);
+    const targets = [];
+    for (const name of allNames) {
+        if (name !== resp.name && head.includes(name)) targets.push(name);
+    }
+    if (/\bChris\b/.test(head)) targets.push('Chris');
+    return targets;
 }
 
 function speakerEl(color, name) {
@@ -326,7 +343,7 @@ function speakerEl(color, name) {
     return el;
 }
 
-function aiBubble(resp) {
+function aiBubble(resp, allNames = []) {
     const el = document.createElement('div');
     const isError = (resp.text || '').startsWith('Error:');
     el.className = `bubble ai-bubble${isError ? ' error-bubble' : ''}`;
@@ -334,6 +351,14 @@ function aiBubble(resp) {
     el.style.borderColor = hexWithAlpha(color, 0.55);
     el.style.background = hexWithAlpha(color, 0.09);
     el.appendChild(speakerEl(color, resp.name));
+
+    const targets = isError ? [] : replyTargets(resp, allNames);
+    if (targets.length) {
+        const thread = document.createElement('div');
+        thread.className = 'reply-hint';
+        thread.textContent = `➤ to ${targets.join(', ')}`;
+        el.appendChild(thread);
+    }
 
     const body = document.createElement('div');
     body.className = 'bubble-text';
@@ -402,7 +427,19 @@ const openaiKeyInput = document.getElementById('set-openai-key');
 const anthropicKeyNote = document.getElementById('anthropic-key-note');
 const openaiKeyNote = document.getElementById('openai-key-note');
 const participantsList = document.getElementById('participants-list');
-const addAiBtn = document.getElementById('add-ai-btn');
+const addAiSelect = document.getElementById('add-ai-select');
+
+// Presets: adding an AI = pick it, paste key, done. Cheapest model per
+// provider, base URL prefilled — all editable under the card's Advanced.
+const AI_PRESETS = {
+    claude:   { name: 'Claude',   provider: 'anthropic', model: 'claude-haiku-4-5', base_url: '', keyHint: 'sk-ant-... (blank = shared Anthropic key)' },
+    chatgpt:  { name: 'ChatGPT',  provider: 'openai',    model: 'gpt-4o-mini',      base_url: '', keyHint: 'sk-... (blank = shared OpenAI key)' },
+    grok:     { name: 'Grok',     provider: 'openai',    model: 'grok-3-mini',      base_url: 'https://api.x.ai/v1', keyHint: 'xai-... (get one at console.x.ai)' },
+    gemini:   { name: 'Gemini',   provider: 'openai',    model: 'gemini-2.0-flash', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/', keyHint: 'AIza... (get one at aistudio.google.com)' },
+    deepseek: { name: 'DeepSeek', provider: 'openai',    model: 'deepseek-chat',    base_url: 'https://api.deepseek.com/v1', keyHint: 'sk-... (get one at platform.deepseek.com)' },
+    ollama:   { name: 'Ollama',   provider: 'openai',    model: 'llama3.2',         base_url: 'http://localhost:11434/v1', key: 'ollama', keyHint: 'no key needed — prefilled' },
+    custom:   { name: '',         provider: 'openai',    model: '',                 base_url: '', keyHint: 'API key' },
+};
 const hostInput = document.getElementById('set-host');
 const portInput = document.getElementById('set-port');
 const testResults = document.getElementById('test-results');
@@ -438,7 +475,7 @@ function renderParticipantCards() {
     for (const p of participantsCache) participantsList.appendChild(participantCard(p));
 }
 
-function participantCard(p = {}) {
+function participantCard(p = {}, keyHint = null) {
     const card = document.createElement('div');
     card.className = 'participant-card';
     card.dataset.pid = p.id || '';
@@ -465,16 +502,30 @@ function participantCard(p = {}) {
     head.appendChild(removeBtn);
     card.appendChild(head);
 
+    // The simple part: just the key
+    let hint = keyHint;
+    if (!hint) {
+        hint = p.api_key_masked ? `saved: ${p.api_key_masked} — leave blank to keep`
+            : (p.uses_shared_key ? 'uses shared key above' : 'API key');
+    }
+    const keyInput = pInput('p-key', 'password', p.prefill_key || '', hint);
+    card.appendChild(pField('API Key', keyInput));
+
+    // Everything else lives behind Advanced
+    const adv = document.createElement('details');
+    adv.className = 'p-advanced';
+    const summary = document.createElement('summary');
+    summary.textContent = 'Advanced (model, provider, endpoint)';
+    adv.appendChild(summary);
+
     const grid = document.createElement('div');
     grid.className = 'participant-grid';
-
     grid.appendChild(pField('Provider', providerSelect(p.provider)));
     grid.appendChild(pField('Model', pInput('p-model', 'text', p.model || '', 'e.g. gpt-4o-mini')));
-    grid.appendChild(pField('API Key (optional)', pInput('p-key', 'password', '',
-        p.api_key_masked ? `saved: ${p.api_key_masked}` : 'uses shared key above')));
-    grid.appendChild(pField('Base URL (optional)', pInput('p-url', 'text', p.base_url || '', 'e.g. https://api.x.ai/v1')));
+    grid.appendChild(pField('Base URL', pInput('p-url', 'text', p.base_url || '', 'blank for Anthropic/OpenAI')));
+    adv.appendChild(grid);
+    card.appendChild(adv);
 
-    card.appendChild(grid);
     return card;
 }
 
@@ -511,8 +562,20 @@ function providerSelect(value) {
     return sel;
 }
 
-addAiBtn.addEventListener('click', () => {
-    participantsList.appendChild(participantCard({}));
+addAiSelect.addEventListener('change', () => {
+    const preset = AI_PRESETS[addAiSelect.value];
+    addAiSelect.value = '';
+    if (!preset) return;
+    const card = participantCard({
+        name: preset.name,
+        provider: preset.provider,
+        model: preset.model,
+        base_url: preset.base_url,
+        prefill_key: preset.key || '',
+    }, preset.keyHint);
+    if (!preset.name) card.querySelector('.p-advanced').open = true;  // custom: show fields
+    participantsList.appendChild(card);
+    card.querySelector(preset.name ? '.p-key' : '.p-name').focus();
 });
 
 function collectParticipants() {
