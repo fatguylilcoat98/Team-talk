@@ -4,6 +4,7 @@ Every round is written to disk immediately after both AI responses arrive,
 so nothing is lost if the process dies.
 """
 
+import html as html_lib
 import json
 import os
 import re
@@ -118,6 +119,91 @@ def delete_session(session_id: str) -> bool:
         return False
     os.remove(path)
     return True
+
+
+_MODE_TITLES = {
+    "collab": "🤝 Collaborate", "debate": "⚔️ Debate", "ai_only": "🤖 AIs only",
+    "devils_advocate": "😈 Devil's Advocate", "steelman": "🛡️ Steelman",
+    "questions": "❓ Questions", "proof": "📋 Proof", "brainstorm": "💡 Brainstorm",
+    "consensus": "🤝 Consensus", "shoot_the_shit": "🍺 Shooting the shit",
+    "roast": "😂 Roast", "after_hours": "🍻 After Hours",
+    "battle_royale": "🥊 Battle Royale", "method_acting": "🎭 Method Acting",
+    "movie_cast": "🎬 Movie Cast", "mystery": "🕵️ Mystery",
+    "courtroom": "⚖️ Courtroom", "late_night": "🎙️ Late Night Panel",
+}
+
+
+def export_html(session: dict) -> str:
+    """A self-contained, share-anywhere HTML page of the conversation."""
+    esc = html_lib.escape
+    parts = []
+    for raw in session.get("rounds", []):
+        r = normalize_round(raw)
+        marker = f"Round {r['round']}"
+        mode_title = _MODE_TITLES.get(r.get("mode"))
+        if mode_title:
+            marker += f" · {mode_title}"
+        parts.append(f'<div class="marker"><span>{esc(marker)}</span></div>')
+
+        chris = esc(r.get("chris_message", ""))
+        att_names = ", ".join(a.get("name", "") for a in r.get("attachments", []))
+        att_html = f'<div class="att">📎 {esc(att_names)}</div>' if att_names else ""
+        parts.append(
+            f'<div class="block chris"><div class="name" style="color:#b8860b">'
+            f'<span class="dot" style="background:#e8b04b"></span>CHRIS</div>'
+            f'<div class="text">{chris}</div>{att_html}</div>'
+        )
+
+        for resp in r.get("responses", []):
+            color = esc(resp.get("color", "#888888"))
+            persona = resp.get("persona")
+            persona_html = f'<span class="persona">🎭 {esc(persona)}</span>' if persona else ""
+            err = ' style="color:#b03030"' if str(resp.get("text", "")).startswith("Error:") else ""
+            parts.append(
+                f'<div class="block" style="border-color:{color}">'
+                f'<div class="name" style="color:{color}">'
+                f'<span class="dot" style="background:{color}"></span>'
+                f'{esc(resp.get("name", "AI"))}{persona_html}</div>'
+                f'<div class="text"{err}>{esc(resp.get("text", ""))}</div></div>'
+            )
+
+    body = "\n".join(parts)
+    title = esc(session.get("id", "Team Talk"))
+    created = esc(session.get("created_at", ""))
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Talk — {title}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #f5f3ee; color: #26221c; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; }}
+  .wrap {{ max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }}
+  h1 {{ font-size: 1.5rem; margin-bottom: 2px; }}
+  .sub {{ color: #8a8272; font-size: 0.85rem; margin-bottom: 24px; }}
+  .marker {{ display: flex; align-items: center; gap: 12px; color: #8a8272; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; margin: 26px 0 12px; }}
+  .marker::before, .marker::after {{ content: ""; flex: 1; height: 1px; background: #ddd6c8; }}
+  .block {{ background: #fffdf8; border: 1px solid #ddd6c8; border-left-width: 4px; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }}
+  .block.chris {{ border-left-color: #e8b04b; background: #fdf6e6; }}
+  .name {{ display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.8rem; letter-spacing: 0.07em; padding: 8px 14px 0; }}
+  .dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
+  .persona {{ font-weight: 400; letter-spacing: normal; color: #8a8272; font-size: 0.78rem; }}
+  .text {{ padding: 6px 14px 12px; white-space: pre-wrap; word-wrap: break-word; }}
+  .att {{ padding: 0 14px 12px; color: #8a8272; font-size: 0.8rem; }}
+  .footer {{ text-align: center; color: #8a8272; font-size: 0.8rem; margin-top: 36px; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Team Talk</h1>
+  <div class="sub">{title} · {created}</div>
+  {body}
+  <div class="footer">One human, several AIs, one conversation — made with <strong>Team Talk</strong> 🍻</div>
+</div>
+</body>
+</html>
+"""
 
 
 def export_markdown(session: dict) -> str:
