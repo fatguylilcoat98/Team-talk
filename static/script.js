@@ -102,11 +102,15 @@ deleteBtn.addEventListener('click', async () => {
 // --- Mode / turn selectors (remembered on this device) --------------------
 
 const awardsToggle = document.getElementById('awards-toggle');
+const splendorToggle = document.getElementById('splendor-toggle');
 turnSelect.value = localStorage.getItem('teamtalk-turns') || 'parallel';
 awardsToggle.checked = localStorage.getItem('teamtalk-awards') !== 'off';
+splendorToggle.checked = localStorage.getItem('teamtalk-splendor') === 'on';
 turnSelect.addEventListener('change', () => localStorage.setItem('teamtalk-turns', turnSelect.value));
 awardsToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-awards', awardsToggle.checked ? 'on' : 'off'));
+splendorToggle.addEventListener('change', () =>
+    localStorage.setItem('teamtalk-splendor', splendorToggle.checked ? 'on' : 'off'));
 
 const MODE_LABELS = {
     collab: '🤝 collaborate',
@@ -259,6 +263,7 @@ async function sendMessage() {
                 modes: selectedModes,
                 turn_style: turnSelect.value,
                 awards: awardsToggle.checked,
+                via_splendor: splendorToggle.checked,
                 attachments: sentAttachments.map((a) => a.id),
             }),
         });
@@ -355,11 +360,18 @@ function buildRound(round, pending = false, reveal = false) {
     chrisRow.className = 'chris-row';
     const chrisBubble = document.createElement('div');
     chrisBubble.className = 'bubble chris-bubble';
-    chrisBubble.appendChild(speakerEl('#e8b04b', 'Chris (you)'));
+    chrisBubble.appendChild(speakerEl('#e8b04b',
+        round.via_splendor ? '🕊️ Splendor (for Chris)' : 'Chris (you)'));
     const chrisText = document.createElement('div');
     chrisText.className = 'bubble-text';
     chrisText.textContent = round.chris_message;
     chrisBubble.appendChild(chrisText);
+    if (round.via_splendor && round.chris_raw) {
+        const raw = document.createElement('div');
+        raw.className = 'via-note';
+        raw.textContent = `you told Splendor: "${round.chris_raw}"`;
+        chrisBubble.appendChild(raw);
+    }
 
     // Attached pictures/files shown inside Chris's bubble
     for (const att of round.attachments || []) {

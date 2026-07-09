@@ -32,6 +32,7 @@ import memory_store
 import notebook_store
 import session_manager
 import settings_store
+import splendor
 from conversation import (SHORT_TERM_ROUNDS, blind_labels, build_context,
                           normalize_modes, role_notes, system_prompt)
 
@@ -65,6 +66,7 @@ class ChatRequest(BaseModel):
     turn_style: Optional[str] = "parallel"  # parallel | sequential
     attachments: Optional[List[str]] = None  # upload ids from /api/upload
     awards: Optional[bool] = True            # live commentary & awards layer
+    via_splendor: Optional[bool] = False     # Splendor delivers Chris's message
 
 
 class ParticipantUpdate(BaseModel):
@@ -147,6 +149,18 @@ async def chat(request: ChatRequest):
         message, history[-1]["chris_message"] if history else "",
         memory_context=memory_block)
 
+    # Speak through Splendor: she delivers Chris's message into the room,
+    # clearly labeled. Any failure falls back to his raw words — Splendor
+    # being down never silences Chris.
+    chris_raw = None
+    via_splendor = False
+    if request.via_splendor:
+        delivered = await splendor.compose(message, history, memory_block=memory_block)
+        if delivered:
+            chris_raw = message
+            message = delivered
+            via_splendor = True
+
     for block in (episode_store.episodes_block(cross_episodes),
                   notebook_store.context_block(),
                   brain.room_sense_block(novelty_score, whisper)):
@@ -174,7 +188,7 @@ async def chat(request: ChatRequest):
                           role_note=notes.get(p["id"]), awards=awards),
             build_context(history, message, me, others, modes, so_far,
                           memory_block=memory_block, attachments_block=attachments_block,
-                          episodes_block=episodes_block),
+                          episodes_block=episodes_block, via_splendor=via_splendor),
         )
 
     responses = []
@@ -237,6 +251,7 @@ async def chat(request: ChatRequest):
         "mode": modes[0],   # older readers see the primary mode
         "modes": modes,
         "turn_style": turn_style,
+        **({"via_splendor": True, "chris_raw": chris_raw} if via_splendor else {}),
         "awards": awards,
         "attachments": [
             {"id": m["id"], "name": m["name"], "kind": m["kind"]} for m in att_metas
