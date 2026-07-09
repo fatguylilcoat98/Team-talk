@@ -540,6 +540,7 @@ const AI_PRESETS = {
     grok:     { name: 'Grok',     provider: 'openai',    model: 'grok-3-mini',      base_url: 'https://api.x.ai/v1', keyHint: 'xai-... (get one at console.x.ai)' },
     gemini:   { name: 'Gemini',   provider: 'openai',    model: 'gemini-3.1-flash-lite', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/', keyHint: 'AIza... (get one at aistudio.google.com)' },
     deepseek: { name: 'DeepSeek', provider: 'openai',    model: 'deepseek-chat',    base_url: 'https://api.deepseek.com/v1', keyHint: 'sk-... (get one at platform.deepseek.com)' },
+    muse:     { name: 'Muse',     provider: 'openai',    model: 'muse-spark-1.1',   base_url: 'https://api.meta.ai/v1', keyHint: 'get one at dev.meta.ai (Meta Model API)' },
     ollama:   { name: 'Ollama',   provider: 'openai',    model: 'llama3.2',         base_url: 'http://localhost:11434/v1', key: 'ollama', keyHint: 'no key needed — prefilled' },
     custom:   { name: '',         provider: 'openai',    model: '',                 base_url: '', keyHint: 'API key' },
 };
