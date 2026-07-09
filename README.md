@@ -133,8 +133,9 @@ Heads-up: images cost more tokens than text — a photo adds roughly a thousand 
 The AIs have **long-term memory that survives across sessions**, stored on your server's hard drive (`memory/memory.json` — gitignored, no external database).
 
 - **How memories get saved:** when an AI decides something is worth keeping (a fact about you, a decision the group made, a preference), it saves a one-line memory automatically — you'll see a small "💾 saved a memory" tag under its reply. You can also just tell them: *"remember that ..."*
-- **How memories get used:** every conversation (any session, any AI) starts with the saved memories in context, so they genuinely remember.
-- **Short-term memory:** the last 12 rounds of the current conversation are always included verbatim; older rounds age out, and whatever mattered survives via long-term memory.
+- **How memories get used:** memories are **ranked by relevance** to what you just said (semantic embeddings, cached on disk in `memory/embeddings.json`) — not just recency — and every memory carries **provenance**: `stated` (you said it — fact) vs `observed` (an AI's interpretation — the AIs are told to hold those with doubt). You can state facts yourself in the Memory modal.
+- **Short-term memory:** the last 12 rounds are included verbatim; older rounds no longer vanish — they're **compressed into episode summaries** (`memory/episodes.json`) that stay in the conversation's context, and relevant episodes from past sessions surface too.
+- **Room sense:** each round gets one shared background pass — topic novelty plus a quiet "what might everyone be missing?" reflection — that all AIs see. Everything degrades gracefully to simple recency if no OpenAI key is set.
 - **Managing it:** tap **🧠 Memory** in the header to see everything they've saved, delete individual memories, or hit "Forget Everything."
 
 ## Personalities 🎭

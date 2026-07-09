@@ -104,8 +104,12 @@
                 <h2>&#129504; Long-term Memory</h2>
                 <button id="memory-close" class="close-btn" title="Close">&times;</button>
             </div>
-            <p class="field-note">Things the AIs saved to remember across sessions — stored on your server in <code>memory/memory.json</code>. Delete anything wrong or stale.</p>
+            <p class="field-note">Things the AIs saved to remember across sessions — stored on your server in <code>memory/memory.json</code>. Memories you add here are marked <strong>stated</strong> (fact, straight from you); ones the AIs save are <strong>observed</strong> (their interpretation). Delete anything wrong or stale.</p>
             <div id="memory-list" class="memory-list"></div>
+            <div class="nb-add">
+                <input type="text" id="memory-input" placeholder="State a fact they should always remember..." maxlength="300">
+                <button id="memory-add-btn">Add</button>
+            </div>
             <div class="modal-actions">
                 <button id="memory-clear-btn" class="danger">Forget Everything</button>
             </div>
