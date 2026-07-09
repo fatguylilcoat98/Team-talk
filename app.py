@@ -29,7 +29,7 @@ import file_store
 import memory_store
 import session_manager
 import settings_store
-from conversation import MODES, build_context, system_prompt
+from conversation import MODES, build_context, role_notes, system_prompt
 
 LAN_WARNING = "Do not expose Team Talk publicly unless authentication is added."
 
@@ -127,11 +127,13 @@ async def chat(request: ChatRequest):
 
     participants = settings_store.get_participants()
     names = [p["name"] for p in participants]
+    notes = role_notes(mode, participants, session["id"])
 
     def prompt_for(p, so_far=None):
         others = [n for n in names if n != p["name"]]
         return (
-            system_prompt(p["name"], others, mode, persona=p.get("persona")),
+            system_prompt(p["name"], others, mode, persona=p.get("persona"),
+                          role_note=notes.get(p["id"])),
             build_context(history, message, p["name"], others, mode, so_far,
                           memory_block=memory_block, attachments_block=attachments_block),
         )
@@ -349,13 +351,18 @@ async def get_session(session_id: str):
 
 
 @app.post("/api/sessions/{session_id}/export")
-async def export_session(session_id: str):
+async def export_session(session_id: str, format: str = "markdown"):
     session = await session_manager.load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    markdown = session_manager.export_markdown(session)
+    if format == "html":
+        return Response(
+            content=session_manager.export_html(session),
+            media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{session_id}.html"'},
+        )
     return Response(
-        content=markdown,
+        content=session_manager.export_markdown(session),
         media_type="text/markdown",
         headers={"Content-Disposition": f'attachment; filename="{session_id}.md"'},
     )

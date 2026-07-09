@@ -61,12 +61,14 @@ sessionSelect.addEventListener('change', () => {
     }
 });
 
-exportBtn.addEventListener('click', async () => {
+async function downloadExport(format, ext) {
     if (!currentSessionId) {
         alert('No active session to export yet.');
         return;
     }
-    const res = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/export`, { method: 'POST' });
+    const res = await fetch(
+        `/api/sessions/${encodeURIComponent(currentSessionId)}/export?format=${format}`,
+        { method: 'POST' });
     if (!res.ok) {
         alert('Export failed.');
         return;
@@ -75,10 +77,13 @@ exportBtn.addEventListener('click', async () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${currentSessionId}.md`;
+    a.download = `${currentSessionId}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
-});
+}
+
+exportBtn.addEventListener('click', () => downloadExport('markdown', 'md'));
+document.getElementById('share-btn').addEventListener('click', () => downloadExport('html', 'html'));
 
 deleteBtn.addEventListener('click', async () => {
     if (!currentSessionId) {
@@ -224,6 +229,14 @@ const MODE_LABELS = {
     brainstorm: '💡 brainstorm',
     shoot_the_shit: '🍺 shooting the shit',
     consensus: '🤝 consensus',
+    roast: '😂 roast',
+    after_hours: '🍻 after hours',
+    battle_royale: '🥊 battle royale',
+    method_acting: '🎭 method acting',
+    movie_cast: '🎬 movie cast',
+    mystery: '🕵️ mystery',
+    courtroom: '⚖️ courtroom',
+    late_night: '🎙️ late night',
 };
 
 function removeEmptyHint() {

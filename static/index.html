@@ -20,6 +20,7 @@
                 <select id="session-select">
                     <option value="new">New Session</option>
                 </select>
+                <button id="share-btn" title="Download a beautiful page of this conversation to share anywhere">&#128279; Share Page</button>
                 <button id="export-btn" title="Download conversation as Markdown">Export as Markdown</button>
                 <button id="delete-btn" class="danger" title="Delete this session">Delete Session</button>
                 <button id="memory-btn" title="What the AIs remember across sessions">&#129504; Memory</button>
@@ -40,16 +41,28 @@
         <div class="chat-options">
             <label>Mode
                 <select id="mode-select" title="How the AIs should behave">
-                    <option value="collab">🤝 Collaborate</option>
-                    <option value="debate">⚔️ Debate</option>
-                    <option value="ai_only">🤖 AIs talk to each other</option>
-                    <option value="devils_advocate">😈 Devil's Advocate</option>
-                    <option value="steelman">🛡️ Steelman</option>
-                    <option value="questions">❓ Questions first</option>
-                    <option value="proof">📋 Proof — back it up</option>
-                    <option value="brainstorm">💡 Brainstorm</option>
-                    <option value="shoot_the_shit">🍺 Shooting the shit</option>
-                    <option value="consensus">🤝 Find consensus</option>
+                    <optgroup label="Serious">
+                        <option value="collab">🤝 Collaborate</option>
+                        <option value="debate">⚔️ Debate</option>
+                        <option value="devils_advocate">😈 Devil's Advocate</option>
+                        <option value="steelman">🛡️ Steelman</option>
+                        <option value="questions">❓ Questions first</option>
+                        <option value="proof">📋 Proof — back it up</option>
+                        <option value="brainstorm">💡 Brainstorm</option>
+                        <option value="consensus">🤝 Find consensus</option>
+                        <option value="courtroom">⚖️ Courtroom</option>
+                    </optgroup>
+                    <optgroup label="Fun &amp; Games">
+                        <option value="shoot_the_shit">🍺 Shooting the shit</option>
+                        <option value="roast">😂 Roast Mode</option>
+                        <option value="after_hours">🍻 After Hours</option>
+                        <option value="ai_only">🤖 AIs talk to each other</option>
+                        <option value="battle_royale">🥊 Battle Royale</option>
+                        <option value="method_acting">🎭 Method Acting</option>
+                        <option value="movie_cast">🎬 Movie Cast</option>
+                        <option value="mystery">🕵️ Mystery — catch the liar</option>
+                        <option value="late_night">🎙️ Late Night Panel</option>
+                    </optgroup>
                 </select>
             </label>
             <label>Turns

@@ -160,7 +160,21 @@ Two dropdowns above the message box:
 - ❓ **Questions first**: no answers yet — they ask you and each other the questions that would most change the conclusion
 - 📋 **Proof — back it up**: every claim needs support or an explicit "I don't have evidence for this," tagged (training data) / (reasoning) / (guess); unsupported claims get called out
 - 💡 **Brainstorm**: rapid ideas, "yes, and..." building on each other, no criticism
-- 🍺 **Shooting the shit**: friends at a bar — short messages, jokes, hot takes, playfully talking crap to each other (and to you). No work, no lectures.
+- ⚖️ **Courtroom**: your message goes on trial — the AIs are assigned prosecutor, defense, and judge roles automatically
+
+And the **Fun & Games** group:
+- 🍺 **Shooting the shit**: friends at a bar — short messages, jokes, hot takes, playfully talking crap to each other (and to you)
+- 😂 **Roast Mode**: they answer the question, but every message must roast somebody
+- 🍻 **After Hours**: the mellow version — around a fire after work, stories and real talk
+- 🥊 **Battle Royale**: everything gets challenged, and every message ends with a running scoreboard
+- 🎭 **Method Acting**: total commitment to their Personality (or a character they invent) — zero lapses
+- 🎬 **Movie Cast**: famous fictional characters solve whatever ridiculous problem you bring
+- 🕵️ **Mystery**: the server secretly assigns one AI to lie — you and the innocent AIs have to catch them. (Even you don't know who it is.)
+- 🎙️ **Late Night Panel**: talk show — the first AI on your roster hosts, the rest are unruly guests
+
+## Sharing conversations
+
+**🔗 Share Page** downloads the conversation as a single beautiful HTML file — name bars, colors, personas, round markers — that opens in any browser. Text it, post it, drop it in a group chat; no server needed to view it.
 - 🤝 **Find consensus**: they work toward a position both can sign, ending each message with AGREED / STILL OPEN lines
 
 You can switch modes mid-conversation — each message uses whatever mode is selected when you hit Send.
