@@ -59,6 +59,7 @@ class ChatRequest(BaseModel):
     mode: Optional[str] = "collab"          # collab | debate | ai_only
     turn_style: Optional[str] = "parallel"  # parallel | sequential
     attachments: Optional[List[str]] = None  # upload ids from /api/upload
+    awards: Optional[bool] = True            # live commentary & awards layer
 
 
 class ParticipantUpdate(BaseModel):
@@ -129,11 +130,13 @@ async def chat(request: ChatRequest):
     names = [p["name"] for p in participants]
     notes = role_notes(mode, participants, session["id"])
 
+    awards = bool(request.awards)
+
     def prompt_for(p, so_far=None):
         others = [n for n in names if n != p["name"]]
         return (
             system_prompt(p["name"], others, mode, persona=p.get("persona"),
-                          role_note=notes.get(p["id"])),
+                          role_note=notes.get(p["id"]), awards=awards),
             build_context(history, message, p["name"], others, mode, so_far,
                           memory_block=memory_block, attachments_block=attachments_block),
         )
@@ -182,6 +185,7 @@ async def chat(request: ChatRequest):
         "chris_message": message,
         "mode": mode,
         "turn_style": turn_style,
+        "awards": awards,
         "attachments": [
             {"id": m["id"], "name": m["name"], "kind": m["kind"]} for m in att_metas
         ],

@@ -102,10 +102,14 @@ deleteBtn.addEventListener('click', async () => {
 
 // --- Mode / turn selectors (remembered on this device) --------------------
 
+const awardsToggle = document.getElementById('awards-toggle');
 modeSelect.value = localStorage.getItem('teamtalk-mode') || 'collab';
 turnSelect.value = localStorage.getItem('teamtalk-turns') || 'parallel';
+awardsToggle.checked = localStorage.getItem('teamtalk-awards') !== 'off';
 modeSelect.addEventListener('change', () => localStorage.setItem('teamtalk-mode', modeSelect.value));
 turnSelect.addEventListener('change', () => localStorage.setItem('teamtalk-turns', turnSelect.value));
+awardsToggle.addEventListener('change', () =>
+    localStorage.setItem('teamtalk-awards', awardsToggle.checked ? 'on' : 'off'));
 
 // --- Attachments -----------------------------------------------------------
 
@@ -183,6 +187,7 @@ async function sendMessage() {
                 session_id: currentSessionId,
                 mode: modeSelect.value,
                 turn_style: turnSelect.value,
+                awards: awardsToggle.checked,
                 attachments: sentAttachments.map((a) => a.id),
             }),
         });

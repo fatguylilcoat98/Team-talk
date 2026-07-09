@@ -318,6 +318,17 @@ button.danger:hover {
     font-size: 0.88rem;
 }
 
+.awards-label {
+    cursor: pointer;
+    user-select: none;
+}
+
+.awards-label input {
+    accent-color: var(--chris);
+    width: 16px;
+    height: 16px;
+}
+
 /* --- Attachments --- */
 .attach-chips {
     display: none;
