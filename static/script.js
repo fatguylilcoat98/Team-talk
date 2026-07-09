@@ -222,6 +222,7 @@ const MODE_LABELS = {
     questions: '❓ questions',
     proof: '📋 proof',
     brainstorm: '💡 brainstorm',
+    shoot_the_shit: '🍺 shooting the shit',
     consensus: '🤝 consensus',
 };
 
