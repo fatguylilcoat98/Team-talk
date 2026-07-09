@@ -172,6 +172,10 @@ And the **Fun & Games** group:
 - 🕵️ **Mystery**: the server secretly assigns one AI to lie — you and the innocent AIs have to catch them. (Even you don't know who it is.)
 - 🎙️ **Late Night Panel**: talk show — the first AI on your roster hosts, the rest are unruly guests
 
+## ⏰ Sense of time
+
+The AIs experience the conversation's timeline. They see when the conversation began, how much real time passed between every round, and how long it's been since your last message — and they're told to treat it as real. Reply in seconds and the room stays hot; come back two days later and they'll notice you were gone. (Requested from inside the app by Claude itself, Round 4 of the "be yourselves" session.)
+
 ## 🏆 Live Commentary & Awards
 
 The signature feature: **the room reacts to itself.** With the 🏆 Awards toggle on (it's on by default, and works in every mode), the AIs will spontaneously — never automatically — hand out awards when something genuinely deserves it:

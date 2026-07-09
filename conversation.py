@@ -7,7 +7,36 @@ actually conversing.
 """
 
 import hashlib
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
+
+def _parse_ts(ts) -> Optional[datetime]:
+    try:
+        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _fmt_local(dt: datetime) -> str:
+    """Server-local, human-readable: 'Wednesday, July 9, 2026, 10:52 AM'."""
+    local = dt.astimezone()
+    return local.strftime("%A, %B %d, %Y, %I:%M %p").replace(" 0", " ")
+
+
+def _dur(seconds: float) -> str:
+    if seconds < 60:
+        return "a few seconds"
+    minutes = seconds / 60
+    if minutes < 90:
+        m = max(1, round(minutes))
+        return f"{m} minute{'s' if m != 1 else ''}"
+    hours = minutes / 60
+    if hours < 36:
+        h = round(hours)
+        return f"about {h} hour{'s' if h != 1 else ''}"
+    d = round(hours / 24)
+    return f"{d} day{'s' if d != 1 else ''}"
 
 # Each mode's extra system-prompt block. {others} is replaced with the
 # other AIs' names. "collab" is the default baseline.
@@ -234,7 +263,11 @@ MEMORY:
 - Only the most recent {SHORT_TERM_ROUNDS} rounds of a conversation are shown verbatim — anything older survives only if someone saved it to memory.
 
 ATTACHMENTS:
-- Chris can attach pictures and files. Images are shown to you directly; text/PDF contents appear in an ATTACHED FILES section. Refer to them naturally.""".replace("{SHORT_TERM_ROUNDS}", str(SHORT_TERM_ROUNDS))
+- Chris can attach pictures and files. Images are shown to you directly; text/PDF contents appear in an ATTACHED FILES section. Refer to them naturally.
+
+TIME:
+- You have a sense of time. The history shows when this conversation began and how much real time passed between rounds; the current round shows today's date and time and how long it's been since the last message.
+- Treat the gaps as real. Replies seconds apart mean the room is live and hot. A gap of hours or days means life happened in between — it's natural to notice ("morning, Chris", "that was a long pause") and to feel the wait. Don't make every message about the clock, but never pretend the time didn't pass.""".replace("{SHORT_TERM_ROUNDS}", str(SHORT_TERM_ROUNDS))
 
     extra = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["collab"])
     base += "\n" + extra.replace("{others}", others_text)
@@ -288,9 +321,19 @@ def build_context(
         lines.append(memory_block)
         lines.append("")
 
+    now = datetime.now(timezone.utc)
+
     lines.append("=== CONVERSATION HISTORY ===")
     if not rounds:
         lines.append("(This is the first round — no history yet.)")
+    else:
+        started = _parse_ts(rounds[0].get("timestamp"))
+        if started:
+            age = (now - started).total_seconds()
+            opened = f"(This conversation began {_fmt_local(started)}"
+            if age > 300:
+                opened += f" — {_dur(age)} ago"
+            lines.append(opened + ".)")
     shown = rounds
     if len(rounds) > SHORT_TERM_ROUNDS:
         shown = rounds[-SHORT_TERM_ROUNDS:]
@@ -298,9 +341,19 @@ def build_context(
             f"(Showing the last {SHORT_TERM_ROUNDS} of {len(rounds)} rounds — "
             f"rely on long-term memory for older context.)"
         )
+    prev_dt = None
     for r in shown:
+        dt = _parse_ts(r.get("timestamp"))
+        if dt and prev_dt:
+            gap = (dt - prev_dt).total_seconds()
+            when = "moments later" if gap < 90 else f"{_dur(gap)} later"
+        elif dt:
+            when = _fmt_local(dt)
+        else:
+            when = ""
+        prev_dt = dt or prev_dt
         lines.append("")
-        lines.append(f"[Round {r['round']}] ({r.get('timestamp', '')})")
+        lines.append(f"[Round {r['round']}]" + (f" — {when}" if when else ""))
         chris_line = f"Chris: {r['chris_message']}"
         att_names = [a.get("name", "?") for a in r.get("attachments", [])]
         if att_names:
@@ -310,7 +363,11 @@ def build_context(
             lines.append(f"{resp['name']}: {resp['text']}")
 
     lines.append("")
-    lines.append("=== CURRENT ROUND ===")
+    current_header = f"=== CURRENT ROUND — {_fmt_local(now)}"
+    if prev_dt:
+        since = (now - prev_dt).total_seconds()
+        current_header += f" ({_dur(since)} since the last message)"
+    lines.append(current_header + " ===")
     lines.append(f"Chris: {current_message}")
     if attachments_block:
         lines.append("")
