@@ -150,6 +150,7 @@ Two dropdowns above the message box:
 - ❓ **Questions first**: no answers yet — they ask you and each other the questions that would most change the conclusion
 - 📋 **Proof — back it up**: every claim needs support or an explicit "I don't have evidence for this," tagged (training data) / (reasoning) / (guess); unsupported claims get called out
 - 💡 **Brainstorm**: rapid ideas, "yes, and..." building on each other, no criticism
+- 🍺 **Shooting the shit**: friends at a bar — short messages, jokes, hot takes, playfully talking crap to each other (and to you). No work, no lectures.
 - 🤝 **Find consensus**: they work toward a position both can sign, ending each message with AGREED / STILL OPEN lines
 
 You can switch modes mid-conversation — each message uses whatever mode is selected when you hit Send.
