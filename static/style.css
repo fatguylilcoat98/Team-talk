@@ -188,65 +188,70 @@ button.danger:hover {
     background: var(--border);
 }
 
-/* Chris: right-aligned gold bubble, like a messaging app */
+/* Chris: full-width gold block at the top of each round */
 .chris-row {
     display: flex;
-    justify-content: flex-end;
 }
 
 .bubble {
-    border-radius: 14px;
-    padding: 10px 14px 12px;
-    max-width: 92%;
+    border-radius: 12px;
+    padding: 0 0 10px;
+    width: 100%;
     white-space: pre-wrap;
     word-wrap: break-word;
+    overflow: hidden;
 }
 
 .chris-bubble {
-    background: rgba(232, 176, 75, 0.16);
+    background: rgba(232, 176, 75, 0.13);
     border: 1px solid rgba(232, 176, 75, 0.45);
-    border-bottom-right-radius: 4px;
 }
 
+/* Name header bar across the top of every block */
 .speaker {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     font-weight: 700;
-    font-size: 0.92rem;
-    margin-bottom: 5px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(0, 0, 0, 0.18);
+    margin-bottom: 8px;
 }
 
 .chris-bubble .speaker { color: var(--chris); }
 
-/* AI replies: side by side on desktop, stacked on phones,
-   each with a bold name header so it's obvious who's talking */
-.ai-pair {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+.bubble .bubble-text,
+.bubble .reply-hint,
+.bubble .tokens-inline,
+.bubble .chat-img,
+.bubble .file-chip,
+.bubble .typing {
+    margin-left: 14px;
+    margin-right: 14px;
+}
+
+/* AI replies: stacked full-width blocks — scales to any number of AIs */
+.ai-stack {
+    display: flex;
+    flex-direction: column;
     gap: 10px;
 }
 
 .ai-bubble {
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-bottom-left-radius: 4px;
-    max-width: 100%;
 }
 
-.ai-bubble.claude {
-    border-color: rgba(217, 119, 87, 0.55);
-    background: rgba(217, 119, 87, 0.09);
+.reply-hint {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-style: italic;
+    margin-bottom: 6px;
 }
-
-.ai-bubble.claude .speaker { color: var(--claude); }
-
-.ai-bubble.chatgpt {
-    border-color: rgba(75, 179, 136, 0.55);
-    background: rgba(75, 179, 136, 0.09);
-}
-
-.ai-bubble.chatgpt .speaker { color: var(--chatgpt); }
 
 .ai-bubble.error-bubble .bubble-text { color: var(--danger); }
 
@@ -592,8 +597,20 @@ button.danger:hover {
     font-size: 0.9rem;
 }
 
-#add-ai-btn {
+#add-ai-select {
     align-self: flex-start;
+    max-width: 240px;
+}
+
+.p-advanced summary {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    cursor: pointer;
+    padding: 2px 0;
+}
+
+.p-advanced[open] summary {
+    margin-bottom: 8px;
 }
 
 .test-results {
@@ -647,13 +664,8 @@ button.danger:hover {
         margin-bottom: -6px;
     }
 
-    .ai-pair,
     .participant-grid {
         grid-template-columns: 1fr;
-    }
-
-    .bubble {
-        max-width: 100%;
     }
 
     .input-section {
