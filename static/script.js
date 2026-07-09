@@ -242,6 +242,7 @@ const MODE_LABELS = {
     mystery: '🕵️ mystery',
     courtroom: '⚖️ courtroom',
     late_night: '🎙️ late night',
+    concrete: '🔨 concrete',
 };
 
 function removeEmptyHint() {

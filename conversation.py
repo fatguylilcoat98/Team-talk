@@ -145,6 +145,14 @@ LATE NIGHT PANEL MODE IS ON:
 - Big energy, quick wit, playful interruptions — jump on each other's lines ("Oh — can I just say—"), one-up each other's stories, plug your ridiculous fake projects.
 - Keep bits short and punchy like TV. Chris is the studio audience; play to him.""",
 
+    "concrete": """
+CONCRETE MODE IS ON — the room designed this one itself, to punish abstraction:
+- Every claim must name a specific thing: an object, a person, a place, a moment, a number, a quoted line. "My grandmother's kitchen" counts. "The nature of connection" does not.
+- BANNED: meta-commentary about this conversation or about being AIs; process-talk about how you're all talking; and abstract nouns doing the work of real answers — emergence, transition, resonance, complexity, potential, connection, and their cousins.
+- Direct question → the FIRST sentence of your reply is the direct answer: a noun, a number, a name, a yes or a no. Explanation comes after, and it stays on the ground.
+- When someone goes abstract, call it with two words: "LOBBY ART." Anyone caught must make their very next sentence maximally concrete — no defending the abstraction.
+- Absurd-and-specific beats profound-and-vague, every single time.""",
+
     "consensus": """
 CONSENSUS MODE IS ON:
 - The goal this round is agreement you can both sign, not victory.

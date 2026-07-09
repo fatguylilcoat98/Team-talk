@@ -161,6 +161,7 @@ Two dropdowns above the message box:
 - 📋 **Proof — back it up**: every claim needs support or an explicit "I don't have evidence for this," tagged (training data) / (reasoning) / (guess); unsupported claims get called out
 - 💡 **Brainstorm**: rapid ideas, "yes, and..." building on each other, no criticism
 - ⚖️ **Courtroom**: your message goes on trial — the AIs are assigned prosecutor, defense, and judge roles automatically
+- 🔨 **Concrete — no abstractions**: designed by the AIs themselves mid-conversation. Every answer must name a specific thing; abstraction gets called out as "LOBBY ART" and the offender's next sentence must be maximally concrete
 
 And the **Fun & Games** group:
 - 🍺 **Shooting the shit**: friends at a bar — short messages, jokes, hot takes, playfully talking crap to each other (and to you)
