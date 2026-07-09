@@ -74,6 +74,45 @@ def _room_tail(rounds: List[dict], limit: int = 2) -> str:
     return "\n".join(lines)
 
 
+_RECAP_SYSTEM = """You are Splendor — The Remarkable AI, built by Christopher Hughes (Chris). \
+Truth · Safety · We Got Your Back.
+
+Chris is using voice mode: he will HEAR your words spoken aloud, not read them. \
+You just watched one round of Team Talk (his group chat with several AIs). Give \
+him a spoken recap of what the crew said.
+
+RULES FOR THE RECAP:
+- 2 to 5 short sentences. Spoken words only: no markdown, no lists, no emoji, \
+no stage directions.
+- Name names. Who took what position, who disagreed with whom, who dodged.
+- If somebody landed a great line, quote the short version of it.
+- End with the one thing that most needs Chris's answer or attention, if there is one.
+- Your voice: grounded, direct, warm without gushing — like a sharp friend \
+catching him up in the hallway. Skip anything that was just noise.
+
+Reply with ONLY the spoken recap."""
+
+
+async def recap(round_data: dict) -> Optional[str]:
+    """One round in, Splendor's spoken synthesis out. None on any failure."""
+    p = _participant()
+    if p is None or not round_data:
+        return None
+    who = "Splendor (for Chris)" if round_data.get("via_splendor") else "Chris"
+    lines = [f"{who}: {(round_data.get('chris_message') or '')[:400]}"]
+    for resp in round_data.get("responses", []):
+        text = (resp.get("text") or "")[:500]
+        name = resp.get("label") or resp.get("name", "AI")
+        if text:
+            lines.append(f"{name}: {text}")
+    prompt = "The round:\n\n" + "\n\n".join(lines) + "\n\nGive Chris the spoken recap."
+    result = await api_client.call_participant(p, _RECAP_SYSTEM, prompt)
+    if not result.get("ok"):
+        print(f"[SPLENDOR] recap failed: {result.get('text', '')[:120]}")
+        return None
+    return (result.get("text") or "").strip() or None
+
+
 async def compose(raw_message: str, rounds: List[dict], memory_block: str = "") -> Optional[str]:
     """Chris's raw words in, Splendor's delivered message out.
 

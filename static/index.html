@@ -84,11 +84,15 @@
             <label class="awards-label" title="Splendor delivers your message into the room on your behalf — clearly labeled. Uncheck anytime to speak raw.">
                 <input type="checkbox" id="splendor-toggle"> 🕊️ Speak through Splendor
             </label>
+            <label class="awards-label" title="Talk with your voice, and hear Splendor recap what the crew said after each round">
+                <input type="checkbox" id="voice-toggle"> 🎙️ Voice
+            </label>
         </div>
 
         <div id="attach-chips" class="attach-chips"></div>
 
         <div class="input-section">
+            <button id="mic-btn" class="attach-btn mic-btn hidden" title="Tap, talk, and it sends when you stop">&#127908;</button>
             <button id="attach-btn" class="attach-btn" title="Attach pictures or files">&#128206;</button>
             <input type="file" id="attach-input" multiple hidden
                    accept="image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.html,.css,.log,.xml,.yaml,.yml,.sh,.ini,.conf,.toml">
