@@ -12,6 +12,7 @@ failing never blocks the others.
 """
 
 import os
+import re
 from typing import Optional
 
 import anthropic
@@ -63,6 +64,56 @@ def _get_client(p: dict, key: str):
             client = AsyncOpenAI(api_key=key, base_url=p.get("base_url") or None, timeout=API_TIMEOUT)
         _clients[cache_key] = client
     return client
+
+
+async def _list_model_ids(client, p: dict) -> list:
+    """The model IDs the provider serves right now (Gemini prefixes 'models/')."""
+    if p.get("provider") == "anthropic":
+        page = await client.models.list(limit=100)
+    else:
+        page = await client.models.list()
+    ids = []
+    for m in getattr(page, "data", []) or []:
+        mid = getattr(m, "id", "") or ""
+        if mid.startswith("models/"):
+            mid = mid[len("models/"):]
+        if mid:
+            ids.append(mid)
+    return ids
+
+
+_NON_CHAT = ("embed", "tts", "audio", "image", "whisper", "dall-e", "imagen",
+             "veo", "aqa", "moderation", "transcribe", "realtime")
+_CHEAP = ("flash", "lite", "mini", "haiku", "nano")
+
+
+def _rank_models(ids: list, configured: str) -> list:
+    """Order the provider's models by similarity to the configured (dead)
+    one, favoring cheap chat models and burying embeddings/TTS/etc."""
+    tokens = [t for t in re.split(r"[-./]", (configured or "").lower()) if len(t) > 2]
+
+    def score(mid: str) -> int:
+        low = mid.lower()
+        s = sum(1 for t in tokens if t in low)
+        s += sum(1 for c in _CHEAP if c in low)
+        s -= sum(5 for b in _NON_CHAT if b in low)
+        return s
+
+    unique = set(ids)
+    chat = [m for m in unique if score(m) >= 0] or list(unique)
+    return sorted(chat, key=lambda m: (-score(m), m))[:5]
+
+
+async def _suggest_models(client, p: dict) -> str:
+    """After a model 404: ask the provider what it DOES serve, so the error
+    message hands Chris working model names instead of a scavenger hunt."""
+    try:
+        ids = await _list_model_ids(client, p)
+    except Exception:
+        return ""
+    if not ids:
+        return ""
+    return " This provider currently serves: " + ", ".join(_rank_models(ids, p.get("model") or "")) + "."
 
 
 def _rate_limit_message(name: str, e: Exception) -> str:
@@ -147,13 +198,15 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
                 "tokens": 0, "ok": False,
             }
         return {"text": f"Error: {name}'s API rejected the request (400): {msg}", "tokens": 0, "ok": False}
-    except (anthropic.NotFoundError, openai.NotFoundError) as e:
-        # Providers retire models — the most common 404 by far
+    except (anthropic.NotFoundError, openai.NotFoundError):
+        # Providers retire models — the most common 404 by far. Ask the
+        # provider what it serves NOW so the fix is copy-paste.
+        suggestions = await _suggest_models(client, p)
         return {
             "text": (
                 f"Error: {name}'s model \"{p.get('model')}\" was not found — the provider "
-                f"may have retired it. Open Settings → {name} → Advanced and update the "
-                f"Model name. (Provider said: {getattr(e, 'message', e)})"
+                f"retired it.{suggestions} Open Settings → {name} → Advanced, paste one of "
+                f"those into Model, and Save."
             ),
             "tokens": 0, "ok": False,
         }
@@ -173,7 +226,17 @@ async def test_participant(p: dict) -> dict:
         return {"id": p.get("id"), "name": name, "ok": False, "detail": "No API key configured."}
     try:
         client = _get_client(p, key)
-        await client.models.list()
+        ids = await _list_model_ids(client, p)
+        model = p.get("model") or ""
+        if ids and model and model not in ids:
+            return {
+                "id": p.get("id"), "name": name, "ok": False,
+                "detail": (
+                    f'Key works, but model "{model}" is not in the provider\'s current '
+                    f"list — it may be retired. Try one of: "
+                    + ", ".join(_rank_models(ids, model)) + "."
+                ),
+            }
         return {"id": p.get("id"), "name": name, "ok": True, "detail": "Key is valid."}
     except (anthropic.AuthenticationError, openai.AuthenticationError):
         return {"id": p.get("id"), "name": name, "ok": False, "detail": "Key was rejected (invalid or revoked)."}

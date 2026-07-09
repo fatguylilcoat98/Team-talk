@@ -461,7 +461,7 @@ const AI_PRESETS = {
     claude:   { name: 'Claude',   provider: 'anthropic', model: 'claude-haiku-4-5', base_url: '', keyHint: 'sk-ant-... (blank = shared Anthropic key)' },
     chatgpt:  { name: 'ChatGPT',  provider: 'openai',    model: 'gpt-4o-mini',      base_url: '', keyHint: 'sk-... (blank = shared OpenAI key)' },
     grok:     { name: 'Grok',     provider: 'openai',    model: 'grok-3-mini',      base_url: 'https://api.x.ai/v1', keyHint: 'xai-... (get one at console.x.ai)' },
-    gemini:   { name: 'Gemini',   provider: 'openai',    model: 'gemini-2.5-flash-lite', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/', keyHint: 'AIza... (get one at aistudio.google.com)' },
+    gemini:   { name: 'Gemini',   provider: 'openai',    model: 'gemini-3.1-flash-lite', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/', keyHint: 'AIza... (get one at aistudio.google.com)' },
     deepseek: { name: 'DeepSeek', provider: 'openai',    model: 'deepseek-chat',    base_url: 'https://api.deepseek.com/v1', keyHint: 'sk-... (get one at platform.deepseek.com)' },
     ollama:   { name: 'Ollama',   provider: 'openai',    model: 'llama3.2',         base_url: 'http://localhost:11434/v1', key: 'ollama', keyHint: 'no key needed — prefilled' },
     custom:   { name: '',         provider: 'openai',    model: '',                 base_url: '', keyHint: 'API key' },
