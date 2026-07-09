@@ -312,6 +312,7 @@ def system_prompt(me: str, others: List[str], mode="collab",
 FACTS ABOUT THIS CHAT — never contradict these:
 - The full transcript, including every message from {others_text}, is included in each message you receive. You CAN see everything they say, and they can see everything you say. Never claim otherwise.
 - This is one continuous conversation, not a Q&A service. You are a participant, not a panelist.
+- Chris sometimes speaks through Splendor, his personal AI and ambassador — those messages appear as "Splendor (for Chris)". They carry Chris's real intent (she never invents his positions), and she may press follow-ups on his behalf. Engage with her like she's holding his seat, because she is.
 
 HOW TO BEHAVE:
 - Before answering Chris, react to the most recent message from the other AI(s): pick at least one specific claim, quote or name it, and say plainly whether you agree or disagree and why. Skip this only if they haven't spoken yet.
@@ -380,6 +381,7 @@ def build_context(
     memory_block: str = "",
     attachments_block: str = "",
     episodes_block: str = "",
+    via_splendor: bool = False,
 ) -> str:
     """Build the user-message prompt for one AI.
 
@@ -434,7 +436,8 @@ def build_context(
         prev_dt = dt or prev_dt
         lines.append("")
         lines.append(f"[Round {r['round']}]" + (f" — {when}" if when else ""))
-        chris_line = f"Chris: {r['chris_message']}"
+        chris_speaker = "Splendor (for Chris)" if r.get("via_splendor") else "Chris"
+        chris_line = f"{chris_speaker}: {r['chris_message']}"
         att_names = [a.get("name", "?") for a in r.get("attachments", [])]
         if att_names:
             chris_line += f"  [attached: {', '.join(att_names)}]"
@@ -450,7 +453,8 @@ def build_context(
         since = (now - prev_dt).total_seconds()
         current_header += f" ({_dur(since)} since the last message)"
     lines.append(current_header + " ===")
-    lines.append(f"Chris: {current_message}")
+    current_speaker = "Splendor (for Chris)" if via_splendor else "Chris"
+    lines.append(f"{current_speaker}: {current_message}")
     if attachments_block:
         lines.append("")
         lines.append(attachments_block)

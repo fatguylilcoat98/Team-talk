@@ -809,3 +809,11 @@ button.danger:hover {
     padding: 8px 12px;
     min-width: 0;
 }
+
+/* --- Speak through Splendor --- */
+.via-note {
+    margin: 8px 14px 0;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-style: italic;
+}

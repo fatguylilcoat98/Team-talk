@@ -155,9 +155,10 @@ def export_html(session: dict) -> str:
         chris = esc(r.get("chris_message", ""))
         att_names = ", ".join(a.get("name", "") for a in r.get("attachments", []))
         att_html = f'<div class="att">📎 {esc(att_names)}</div>' if att_names else ""
+        chris_name = "SPLENDOR (FOR CHRIS)" if r.get("via_splendor") else "CHRIS"
         parts.append(
             f'<div class="block chris"><div class="name" style="color:#b8860b">'
-            f'<span class="dot" style="background:#e8b04b"></span>CHRIS</div>'
+            f'<span class="dot" style="background:#e8b04b"></span>{chris_name}</div>'
             f'<div class="text">{chris}</div>{att_html}</div>'
         )
 
@@ -229,7 +230,7 @@ def export_markdown(session: dict) -> str:
             "",
             f"## Round {r['round']}  ({r.get('timestamp', '')})",
             "",
-            f"**Chris:** {r['chris_message']}",
+            f"**{'Splendor (for Chris)' if r.get('via_splendor') else 'Chris'}:** {r['chris_message']}",
             "",
         ]
         for resp in r["responses"]:
