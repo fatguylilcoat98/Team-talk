@@ -130,7 +130,14 @@ _MODE_TITLES = {
     "battle_royale": "🥊 Battle Royale", "method_acting": "🎭 Method Acting",
     "movie_cast": "🎬 Movie Cast", "mystery": "🕵️ Mystery",
     "courtroom": "⚖️ Courtroom", "late_night": "🎙️ Late Night Panel",
+    "concrete": "🔨 Concrete", "hard_truth": "💊 Hard Truth", "blind": "🕶️ Blind",
 }
+
+
+def _mode_marker(r: dict) -> str:
+    modes = r.get("modes") or ([r["mode"]] if r.get("mode") else [])
+    titles = [_MODE_TITLES.get(m, m) for m in modes if m != "collab" or len(modes) == 1]
+    return " + ".join(t for t in titles if t)
 
 
 def export_html(session: dict) -> str:
@@ -140,7 +147,7 @@ def export_html(session: dict) -> str:
     for raw in session.get("rounds", []):
         r = normalize_round(raw)
         marker = f"Round {r['round']}"
-        mode_title = _MODE_TITLES.get(r.get("mode"))
+        mode_title = _mode_marker(r)
         if mode_title:
             marker += f" · {mode_title}"
         parts.append(f'<div class="marker"><span>{esc(marker)}</span></div>')
@@ -159,11 +166,13 @@ def export_html(session: dict) -> str:
             persona = resp.get("persona")
             persona_html = f'<span class="persona">🎭 {esc(persona)}</span>' if persona else ""
             err = ' style="color:#b03030"' if str(resp.get("text", "")).startswith("Error:") else ""
+            # Blind rounds stay anonymous in the share page too
+            shown_name = resp.get("label") or resp.get("name", "AI")
             parts.append(
                 f'<div class="block" style="border-color:{color}">'
                 f'<div class="name" style="color:{color}">'
                 f'<span class="dot" style="background:{color}"></span>'
-                f'{esc(resp.get("name", "AI"))}{persona_html}</div>'
+                f'{esc(shown_name)}{persona_html}</div>'
                 f'<div class="text"{err}>{esc(resp.get("text", ""))}</div></div>'
             )
 
@@ -225,7 +234,7 @@ def export_markdown(session: dict) -> str:
         ]
         for resp in r["responses"]:
             lines += [
-                f"### {resp['name']}  (tokens: {resp.get('tokens', '--')})",
+                f"### {resp.get('label') or resp['name']}  (tokens: {resp.get('tokens', '--')})",
                 "",
                 resp.get("text", ""),
                 "",

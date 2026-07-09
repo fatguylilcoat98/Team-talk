@@ -9,7 +9,6 @@ const historyDiv = document.getElementById('history');
 const chrisInput = document.getElementById('chris-input');
 const sendBtn = document.getElementById('send-btn');
 const legendDiv = document.getElementById('legend');
-const modeSelect = document.getElementById('mode-select');
 const turnSelect = document.getElementById('turn-select');
 
 let currentSessionId = null;
@@ -103,13 +102,84 @@ deleteBtn.addEventListener('click', async () => {
 // --- Mode / turn selectors (remembered on this device) --------------------
 
 const awardsToggle = document.getElementById('awards-toggle');
-modeSelect.value = localStorage.getItem('teamtalk-mode') || 'collab';
 turnSelect.value = localStorage.getItem('teamtalk-turns') || 'parallel';
 awardsToggle.checked = localStorage.getItem('teamtalk-awards') !== 'off';
-modeSelect.addEventListener('change', () => localStorage.setItem('teamtalk-mode', modeSelect.value));
 turnSelect.addEventListener('change', () => localStorage.setItem('teamtalk-turns', turnSelect.value));
 awardsToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-awards', awardsToggle.checked ? 'on' : 'off'));
+
+const MODE_LABELS = {
+    collab: '🤝 collaborate',
+    hard_truth: '💊 hard truth',
+    blind: '🕶️ blind',
+    debate: '⚔️ debate',
+    ai_only: '🤖 AIs only',
+    devils_advocate: "😈 devil's advocate",
+    steelman: '🛡️ steelman',
+    questions: '❓ questions',
+    proof: '📋 proof',
+    brainstorm: '💡 brainstorm',
+    shoot_the_shit: '🍺 shooting the shit',
+    consensus: '🤝 consensus',
+    roast: '😂 roast',
+    after_hours: '🍻 after hours',
+    battle_royale: '🥊 battle royale',
+    method_acting: '🎭 method acting',
+    movie_cast: '🎬 movie cast',
+    mystery: '🕵️ mystery',
+    courtroom: '⚖️ courtroom',
+    late_night: '🎙️ late night',
+    concrete: '🔨 concrete',
+};
+
+// Modes stack: pick up to 3 at once (e.g. Hard Truth + Roast).
+// "Collaborate" is the plain default and doesn't mix with the others.
+const MAX_MODES = 3;
+const modePicker = document.getElementById('mode-picker');
+const modeSummary = document.getElementById('mode-summary');
+const modeChecks = [...modePicker.querySelectorAll('input[type="checkbox"]')];
+
+let selectedModes = [];
+try { selectedModes = JSON.parse(localStorage.getItem('teamtalk-modes')) || []; } catch (e) { /* fresh start */ }
+if (!selectedModes.length) {
+    const old = localStorage.getItem('teamtalk-mode');  // pre-stacking preference
+    if (old) selectedModes = [old];
+}
+selectedModes = selectedModes.filter((m) => modeChecks.some((c) => c.value === m)).slice(0, MAX_MODES);
+if (!selectedModes.length) selectedModes = ['collab'];
+
+function syncModePicker() {
+    for (const c of modeChecks) c.checked = selectedModes.includes(c.value);
+    modeSummary.textContent = selectedModes.map((m) => MODE_LABELS[m] || m).join(' + ');
+    localStorage.setItem('teamtalk-modes', JSON.stringify(selectedModes));
+}
+
+for (const c of modeChecks) {
+    c.addEventListener('change', () => {
+        if (c.checked) {
+            if (c.value === 'collab') {
+                selectedModes = ['collab'];          // back to normal
+            } else {
+                selectedModes = selectedModes.filter((m) => m !== 'collab');
+                if (selectedModes.length >= MAX_MODES) {
+                    c.checked = false;
+                    return;
+                }
+                selectedModes.push(c.value);
+            }
+        } else {
+            selectedModes = selectedModes.filter((m) => m !== c.value);
+        }
+        if (!selectedModes.length) selectedModes = ['collab'];
+        syncModePicker();
+    });
+}
+syncModePicker();
+
+// Tap anywhere else to close the picker
+document.addEventListener('click', (e) => {
+    if (modePicker.open && !modePicker.contains(e.target)) modePicker.open = false;
+});
 
 // --- Attachments -----------------------------------------------------------
 
@@ -185,7 +255,8 @@ async function sendMessage() {
             body: JSON.stringify({
                 message: message,
                 session_id: currentSessionId,
-                mode: modeSelect.value,
+                mode: selectedModes[0],   // old servers read this one
+                modes: selectedModes,
                 turn_style: turnSelect.value,
                 awards: awardsToggle.checked,
                 attachments: sentAttachments.map((a) => a.id),
@@ -224,27 +295,6 @@ async function sendMessage() {
 
 // --- Rendering -----------------------------------------------------------
 
-const MODE_LABELS = {
-    debate: '⚔️ debate',
-    ai_only: '🤖 AIs only',
-    devils_advocate: "😈 devil's advocate",
-    steelman: '🛡️ steelman',
-    questions: '❓ questions',
-    proof: '📋 proof',
-    brainstorm: '💡 brainstorm',
-    shoot_the_shit: '🍺 shooting the shit',
-    consensus: '🤝 consensus',
-    roast: '😂 roast',
-    after_hours: '🍻 after hours',
-    battle_royale: '🥊 battle royale',
-    method_acting: '🎭 method acting',
-    movie_cast: '🎬 movie cast',
-    mystery: '🕵️ mystery',
-    courtroom: '⚖️ courtroom',
-    late_night: '🎙️ late night',
-    concrete: '🔨 concrete',
-};
-
 function removeEmptyHint() {
     const hint = historyDiv.querySelector('.empty-hint');
     if (hint) hint.remove();
@@ -269,19 +319,34 @@ function normalizeRound(round) {
     return round;
 }
 
-function buildRound(round, pending = false) {
+function buildRound(round, pending = false, reveal = false) {
     round = normalizeRound(round);
     const roundEl = document.createElement('div');
     roundEl.className = 'round';
+    const roundModes = round.modes || (round.mode ? [round.mode] : []);
+    const isBlind = (round.responses || []).some((r) => r.label);
 
     if (round.round) {
         const marker = document.createElement('div');
         marker.className = 'round-marker';
         let label = `Round ${round.round}`;
-        if (MODE_LABELS[round.mode]) label += ` · ${MODE_LABELS[round.mode]}`;
+        const modeText = roundModes
+            .filter((m) => m !== 'collab' || roundModes.length === 1)
+            .map((m) => MODE_LABELS[m] || m)
+            .filter((m) => m !== '🤝 collaborate')
+            .join(' + ');
+        if (modeText) label += ` · ${modeText}`;
         if (round.turn_style === 'sequential') label += ' · 🔁';
         if ((round.responses || []).length > 2) label += ` · ${round.responses.length} AIs`;
-        marker.textContent = label;
+        marker.appendChild(document.createTextNode(label));
+        if (isBlind) {
+            const btn = document.createElement('button');
+            btn.className = 'reveal-btn';
+            btn.textContent = reveal ? '🙈 hide' : '👁 reveal';
+            btn.title = reveal ? 'Hide the real names again' : 'Show who each voice really was';
+            btn.addEventListener('click', () => roundEl.replaceWith(buildRound(round, false, !reveal)));
+            marker.appendChild(btn);
+        }
         roundEl.appendChild(marker);
     }
 
@@ -326,11 +391,14 @@ function buildRound(round, pending = false) {
         const roster = participantsCache.length
             ? participantsCache
             : [{ id: 'ai1', name: 'AI', color: '#93a0b8' }];
-        for (const p of roster) stack.appendChild(typingBubble(p));
+        const blindNow = selectedModes.includes('blind');
+        for (const p of roster) {
+            stack.appendChild(typingBubble(blindNow ? { name: 'Voice ?', color: '#8a93a5' } : p));
+        }
     } else {
-        const names = (round.responses || []).map((r) => r.name);
+        const names = (round.responses || []).map((r) => (reveal ? r.name : (r.label || r.name)));
         for (const resp of round.responses || []) {
-            stack.appendChild(aiBubble(resp, names));
+            stack.appendChild(aiBubble(resp, names, reveal));
         }
     }
     roundEl.appendChild(stack);
@@ -340,11 +408,11 @@ function buildRound(round, pending = false) {
 
 // Who is this reply engaging with? Look for other participants' names
 // early in the message and show a small "➤ to ..." thread hint.
-function replyTargets(resp, allNames) {
-    const head = (resp.text || '').slice(0, 250);
+function replyTargets(text, selfName, allNames) {
+    const head = (text || '').slice(0, 250);
     const targets = [];
     for (const name of allNames) {
-        if (name !== resp.name && head.includes(name)) targets.push(name);
+        if (name !== selfName && head.includes(name)) targets.push(name);
     }
     if (/\bChris\b/.test(head)) targets.push('Chris');
     return targets;
@@ -362,14 +430,21 @@ function speakerEl(color, name) {
     return el;
 }
 
-function aiBubble(resp, allNames = []) {
+function aiBubble(resp, allNames = [], reveal = false) {
     const el = document.createElement('div');
     const isError = (resp.text || '').startsWith('Error:');
     el.className = `bubble ai-bubble${isError ? ' error-bubble' : ''}`;
-    const color = resp.color || '#93a0b8';
+    // Blind rounds: anonymous label + neutral color; "reveal" swaps in the
+    // real name and the AI's usual color (looked up from the roster).
+    const shownName = reveal ? resp.name : (resp.label || resp.name);
+    let color = resp.color || '#93a0b8';
+    if (resp.label && reveal) {
+        const p = participantsCache.find((q) => q.id === resp.id);
+        if (p && p.color) color = p.color;
+    }
     el.style.borderColor = hexWithAlpha(color, 0.55);
     el.style.background = hexWithAlpha(color, 0.09);
-    const speaker = speakerEl(color, resp.name);
+    const speaker = speakerEl(color, shownName);
     if (resp.persona) {
         const badge = document.createElement('span');
         badge.className = 'persona-badge';
@@ -378,7 +453,7 @@ function aiBubble(resp, allNames = []) {
     }
     el.appendChild(speaker);
 
-    const targets = isError ? [] : replyTargets(resp, allNames);
+    const targets = isError ? [] : replyTargets(resp.text, shownName, allNames);
     if (targets.length) {
         const thread = document.createElement('div');
         thread.className = 'reply-hint';
@@ -396,8 +471,10 @@ function aiBubble(resp, allNames = []) {
         t.className = 'tokens-inline';
         let extra = '';
         if (resp.memories_saved) {
-            extra = `  ·  💾 saved ${resp.memories_saved === 1 ? 'a memory' : resp.memories_saved + ' memories'}`;
+            extra += `  ·  💾 saved ${resp.memories_saved === 1 ? 'a memory' : resp.memories_saved + ' memories'}`;
         }
+        if (resp.notebook_saved) extra += '  ·  📓 wrote in the notebook';
+        if (resp.pins_saved) extra += '  ·  📌 pinned a quote';
         t.textContent = `tokens: ${resp.tokens}${extra}`;
         el.appendChild(t);
     }
@@ -794,6 +871,94 @@ memoryClearBtn.addEventListener('click', async () => {
     if (!confirm('Delete ALL long-term memories? The AIs will forget everything saved so far.')) return;
     await fetch('/api/memory', { method: 'DELETE' });
     renderMemories();
+});
+
+// --- The Notebook (shared scratchpad + pinned quotes) ------------------------
+
+const notebookBtn = document.getElementById('notebook-btn');
+const notebookOverlay = document.getElementById('notebook-overlay');
+const notebookClose = document.getElementById('notebook-close');
+const pinList = document.getElementById('pin-list');
+const notebookList = document.getElementById('notebook-list');
+const notebookInput = document.getElementById('notebook-input');
+const notebookAddBtn = document.getElementById('notebook-add-btn');
+const notebookClearBtn = document.getElementById('notebook-clear-btn');
+
+notebookBtn.addEventListener('click', async () => {
+    notebookOverlay.classList.remove('hidden');
+    await renderNotebook();
+});
+notebookClose.addEventListener('click', () => notebookOverlay.classList.add('hidden'));
+notebookOverlay.addEventListener('click', (e) => {
+    if (e.target === notebookOverlay) notebookOverlay.classList.add('hidden');
+});
+
+function notebookRow(item, kind) {
+    const row = document.createElement('div');
+    row.className = 'memory-item';
+    const text = document.createElement('div');
+    text.className = 'memory-text';
+    text.textContent = kind === 'pins' ? `“${item.text}”` : item.text;
+    const meta = document.createElement('div');
+    meta.className = 'memory-meta';
+    meta.textContent = `${item.by} · ${(item.created_at || '').slice(0, 10)}`;
+    const del = document.createElement('button');
+    del.className = 'memory-del danger';
+    del.textContent = '×';
+    del.title = 'Delete';
+    del.addEventListener('click', async () => {
+        await fetch(`/api/notebook/${kind}/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+        renderNotebook();
+    });
+    row.appendChild(text);
+    row.appendChild(meta);
+    row.appendChild(del);
+    return row;
+}
+
+async function renderNotebook() {
+    pinList.innerHTML = '<p class="field-note">Loading…</p>';
+    notebookList.innerHTML = '';
+    try {
+        const res = await fetch('/api/notebook');
+        if (res.status === 404) {
+            throw new Error('server is running old code — run: sudo /opt/team-talk/update.sh');
+        }
+        const data = await res.json();
+        pinList.innerHTML = '';
+        notebookList.innerHTML = '';
+        if (!data.pins.length) {
+            pinList.innerHTML = '<p class="field-note">No pinned quotes yet — any AI can pin an exact line with PIN:</p>';
+        }
+        for (const p of [...data.pins].reverse()) pinList.appendChild(notebookRow(p, 'pins'));
+        if (!data.entries.length) {
+            notebookList.innerHTML = '<p class="field-note">Empty so far. The AIs write here on their own with NOTEBOOK: lines — raw thoughts in their own words, kept across sessions.</p>';
+        }
+        for (const e of [...data.entries].reverse()) notebookList.appendChild(notebookRow(e, 'entries'));
+    } catch (err) {
+        pinList.innerHTML = `<p class="field-note">Could not load the notebook: ${err.message}</p>`;
+    }
+}
+
+notebookAddBtn.addEventListener('click', async () => {
+    const text = notebookInput.value.trim();
+    if (!text) return;
+    await fetch('/api/notebook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+    });
+    notebookInput.value = '';
+    renderNotebook();
+});
+notebookInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') notebookAddBtn.click();
+});
+
+notebookClearBtn.addEventListener('click', async () => {
+    if (!confirm('Delete the ENTIRE notebook — every entry and every pinned quote?')) return;
+    await fetch('/api/notebook', { method: 'DELETE' });
+    renderNotebook();
 });
 
 // --- Stale-server detection ------------------------------------------------
