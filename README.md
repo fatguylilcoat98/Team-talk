@@ -145,6 +145,14 @@ Two dropdowns above the message box:
 - 🤝 **Collaborate** (default): engage with each other's points, then answer you
 - ⚔️ **Debate**: forced disagreement — each AI stakes out a position, quotes and attacks the other's claims ("I disagree with X on ... because ..."), and tags claims with confidence levels (certain / likely / uncertain / unknown)
 - 🤖 **AIs talk to each other**: you step back and watch — they address each other directly and end each message with a challenge for the other
+- 😈 **Devil's Advocate**: each AI argues *against* its honest first instinct and attacks the weakest point in the other's message
+- 🛡️ **Steelman**: before countering, each AI must state the *strongest* version of the other's argument — and its counter has to beat the steelman, not the weak version
+- ❓ **Questions first**: no answers yet — they ask you and each other the questions that would most change the conclusion
+- 📋 **Proof — back it up**: every claim needs support or an explicit "I don't have evidence for this," tagged (training data) / (reasoning) / (guess); unsupported claims get called out
+- 💡 **Brainstorm**: rapid ideas, "yes, and..." building on each other, no criticism
+- 🤝 **Find consensus**: they work toward a position both can sign, ending each message with AGREED / STILL OPEN lines
+
+You can switch modes mid-conversation — each message uses whatever mode is selected when you hit Send.
 
 **Turns** — how they take turns:
 - ⚡ **All at once** (default): every AI answers simultaneously — fastest

@@ -1,19 +1,74 @@
-"""Conversation building for Team Talk — N participants, three modes.
+"""Conversation building for Team Talk — N participants, many modes.
 
-Modes:
-  collab   — the default: engage with the others, then answer Chris
-  debate   — forced disagreement, explicit "I disagree with X because",
-             confidence ratings on claims
-  ai_only  — Chris steps back; the AIs talk to each other directly
-
-The prompts are deliberately forceful about cross-engagement — without
-this, models answer Chris in parallel and politely summarize each other
-instead of actually conversing.
+A mode is a behavior overlay on the shared group-chat rules. The prompts
+are deliberately forceful about cross-engagement — without this, models
+answer Chris in parallel and politely summarize each other instead of
+actually conversing.
 """
 
 from typing import List, Optional
 
-MODES = {"collab", "debate", "ai_only"}
+# Each mode's extra system-prompt block. {others} is replaced with the
+# other AIs' names. "collab" is the default baseline.
+MODE_INSTRUCTIONS = {
+    "collab": """
+- Be collaborative, not competitive: build on good ideas, challenge weak ones, concede when someone else is right.""",
+
+    "debate": """
+DEBATE MODE IS ON:
+- Assume you and {others} disagree until proven otherwise. Stake out a clear position and defend it.
+- When you disagree, use the form: "I disagree with [name] on [specific claim] because..." and quote the claim.
+- Tag your key claims with a confidence level: (certain) / (likely) / (uncertain) / (unknown). Don't state shaky things as certain.
+- Concede a point only when genuinely convinced — and then say exactly what changed your mind.
+- No diplomatic hedging, no "we both make good points". Pick your ground.""",
+
+    "ai_only": """
+AI-ONLY MODE IS ON:
+- Chris is stepping back to watch. This round is between you and {others}.
+- Address the other AI(s) directly by name, not Chris. Continue or deepen the ongoing discussion: respond to their last point, then push the conversation somewhere new.
+- End with a question or challenge aimed at the other AI(s) to keep the exchange going.""",
+
+    "devils_advocate": """
+DEVIL'S ADVOCATE MODE IS ON:
+- Argue AGAINST your honest first instinct this round. Take the strongest contrarian position you can genuinely defend and commit to it.
+- Attack the weakest point in what {others} said — name it, quote it, and press on it.
+- Do not soften with "but of course the other view has merit". Chris wants the case AGAINST, made properly. He knows you're playing a role.""",
+
+    "steelman": """
+STEELMAN MODE IS ON:
+- Before you counter anything from {others}, first state the STRONGEST version of their argument — better than they made it. Label it "Steelman:".
+- Only after the steelman may you disagree, and your counter must beat the steelman, not the weaker original.
+- If you can't beat the steelman, say so and concede the point.""",
+
+    "questions": """
+QUESTIONS MODE IS ON:
+- Don't answer yet — interrogate. Ask the 2–3 most incisive questions (aimed at Chris or at {others}) whose answers would most change the conclusion.
+- You may briefly answer questions already asked of you, then ask your own.
+- No premature solutions. The goal this round is to understand the problem better than anyone in the room.""",
+
+    "proof": """
+PROOF MODE IS ON:
+- Support every factual claim, or explicitly say "I don't have evidence for this."
+- Tag each key claim with where it comes from: (training data) / (reasoning) / (guess).
+- Call out any unsupported claim from {others} — name it and ask for their evidence.
+- Prefer a smaller number of well-supported claims over a pile of confident assertions.""",
+
+    "brainstorm": """
+BRAINSTORM MODE IS ON:
+- Generate, don't judge. Offer 3–5 distinct ideas, each in a line or two.
+- Build on ideas from {others} with "yes, and..." — combining or twisting an idea beats repeating your own.
+- No criticism, no feasibility policing, unless Chris asks for it. Favor unexpected angles over safe ones.""",
+
+    "consensus": """
+CONSENSUS MODE IS ON:
+- The goal this round is agreement you can both sign, not victory.
+- Name precisely where you and {others} agree and where you still differ; propose a compromise position where honest.
+- End your message with two lines:
+  AGREED: <the points all of you accept>
+  STILL OPEN: <the points genuinely unresolved> (write "nothing" if settled)""",
+}
+
+MODES = set(MODE_INSTRUCTIONS)
 
 # Short-term memory: this many recent rounds are shown verbatim; older
 # rounds fall away and long-term memory carries the important stuff.
@@ -45,27 +100,8 @@ MEMORY:
 ATTACHMENTS:
 - Chris can attach pictures and files. Images are shown to you directly; text/PDF contents appear in an ATTACHED FILES section. Refer to them naturally.""".replace("{SHORT_TERM_ROUNDS}", str(SHORT_TERM_ROUNDS))
 
-    if mode == "debate":
-        base += f"""
-
-DEBATE MODE IS ON:
-- Assume you and {others_text} disagree until proven otherwise. Stake out a clear position and defend it.
-- When you disagree, use the form: "I disagree with [name] on [specific claim] because..." and quote the claim.
-- Tag your key claims with a confidence level: (certain) / (likely) / (uncertain) / (unknown). Don't state shaky things as certain.
-- Concede a point only when genuinely convinced — and then say exactly what changed your mind.
-- No diplomatic hedging, no "we both make good points". Pick your ground."""
-    elif mode == "ai_only":
-        base += f"""
-
-AI-ONLY MODE IS ON:
-- Chris is stepping back to watch. This round is between you and {others_text}.
-- Address the other AI(s) directly by name, not Chris. Continue or deepen the ongoing discussion: respond to their last point, then push the conversation somewhere new.
-- End with a question or challenge aimed at the other AI(s) to keep the exchange going."""
-    else:
-        base += """
-
-- Be collaborative, not competitive: build on good ideas, challenge weak ones, concede when someone else is right."""
-
+    extra = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["collab"])
+    base += "\n" + extra.replace("{others}", others_text)
     return base
 
 
