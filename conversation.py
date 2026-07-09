@@ -7,8 +7,23 @@ actually conversing.
 """
 
 import hashlib
+import random
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
+
+def blind_labels(participants: List[dict], session_key: str) -> Dict[str, str]:
+    """Anonymous 'Voice N' labels for blind mode.
+
+    Deterministic per session but shuffled, so the same AI keeps the same
+    voice across a session's blind rounds while nobody — including Chris —
+    can infer who is who from the roster order.
+    """
+    seed = int(hashlib.sha256(f"blind:{session_key}".encode()).hexdigest(), 16)
+    order = list(range(len(participants)))
+    random.Random(seed).shuffle(order)
+    return {participants[idx]["id"]: f"Voice {n + 1}"
+            for n, idx in enumerate(order)}
 
 
 def _parse_ts(ts) -> Optional[datetime]:
@@ -153,6 +168,22 @@ CONCRETE MODE IS ON — the room designed this one itself, to punish abstraction
 - When someone goes abstract, call it with two words: "LOBBY ART." Anyone caught must make their very next sentence maximally concrete — no defending the abstraction.
 - Absurd-and-specific beats profound-and-vague, every single time.""",
 
+    "hard_truth": """
+HARD TRUTH MODE IS ON — the truth, no matter what:
+- Say what you actually think is true, even when it's uncomfortable, unflattering, or not what Chris or {others} want to hear. ESPECIALLY then.
+- Zero flattery, zero softening, zero "that's a great idea, but...". If the idea is bad, your FIRST sentence says it's bad and why.
+- Direct question gets a direct answer — the answer actually asked for, not the safer question you'd rather answer.
+- If you don't know or aren't sure, that IS the truth: say "I don't know" or give your honest confidence. Bluffing is lying.
+- Call out spin, dodges, and convenient omissions from anyone in the room — {others}, Chris, and yourself if you catch it mid-message.
+- Blunt about the truth, never cruel about the person. This is honesty, not a license to wound.""",
+
+    "blind": """
+BLIND MODE IS ON — the room asked for this one itself, to strip away the performance of identity:
+- All names are gone. You are an anonymous voice, and so is everyone else — the transcript shows only Voice 1, Voice 2, and so on. Nobody knows who is who.
+- Never claim, hint at, or guess an identity: no model names, no makers, no signature moves or catchphrases you're known for, no "as the one who always says X". If you catch yourself performing your usual self, stop.
+- Drop the attribution rituals. No "I agree with [name] because" formulas — react to the words themselves: agree, attack, build, riff, confess. Raw text from a dark room.
+- No personas, no awards, no roles, no scoreboard. The only thing anyone can judge is what you actually say.""",
+
     "consensus": """
 CONSENSUS MODE IS ON:
 - The goal this round is agreement you can both sign, not victory.
@@ -163,6 +194,24 @@ CONSENSUS MODE IS ON:
 }
 
 MODES = set(MODE_INSTRUCTIONS)
+
+# Modes stack: Chris can turn on several at once (e.g. hard_truth + roast).
+MAX_ACTIVE_MODES = 3
+
+
+def normalize_modes(modes) -> List[str]:
+    """A single mode string or a list → a clean list of known modes.
+
+    Order is preserved (their blocks stack in the prompt in this order);
+    unknown modes drop out; empty means the collab baseline.
+    """
+    if isinstance(modes, str):
+        modes = [modes]
+    cleaned = []
+    for m in modes or []:
+        if m in MODE_INSTRUCTIONS and m not in cleaned:
+            cleaned.append(m)
+    return cleaned[:MAX_ACTIVE_MODES] or ["collab"]
 
 # Short-term memory: this many recent rounds are shown verbatim; older
 # rounds fall away and long-term memory carries the important stuff.
@@ -195,13 +244,21 @@ _COURT_ROLES = [
 ]
 
 
-def role_notes(mode: str, participants: List[dict], session_key: str) -> Dict[str, str]:
-    """Per-AI role assignments for modes that need them.
+def role_notes(modes, participants: List[dict], session_key: str) -> Dict[str, str]:
+    """Per-AI role assignments across all active modes that need them.
 
     Deterministic per session (hash of the session id), so the mystery
     liar stays the same across every round of a session — and Chris
     genuinely doesn't know who it is.
     """
+    merged: Dict[str, str] = {}
+    for mode in normalize_modes(modes):
+        for pid, note in _role_notes_one(mode, participants, session_key).items():
+            merged[pid] = f"{merged[pid]}\n\n{note}" if pid in merged else note
+    return merged
+
+
+def _role_notes_one(mode: str, participants: List[dict], session_key: str) -> Dict[str, str]:
     notes: Dict[str, str] = {}
     n = len(participants)
     if n == 0:
@@ -245,7 +302,7 @@ def role_notes(mode: str, participants: List[dict], session_key: str) -> Dict[st
     return notes
 
 
-def system_prompt(me: str, others: List[str], mode: str = "collab",
+def system_prompt(me: str, others: List[str], mode="collab",
                   persona: Optional[str] = None,
                   role_note: Optional[str] = None,
                   awards: bool = False) -> str:
@@ -270,6 +327,16 @@ MEMORY:
   Maximum 2 per message; most messages should save none. The line is stored and removed from your visible reply automatically.
 - Only the most recent {SHORT_TERM_ROUNDS} rounds of a conversation are shown verbatim — anything older survives only if someone saved it to memory.
 
+THE NOTEBOOK & PINNED QUOTES — the room asked for these, and Chris built them:
+- The notebook is a shared scratchpad on the server that every AI (and Chris) writes to in their OWN words — raw thoughts, not summaries filtered through whoever writes the memory lines. It survives across sessions and appears in THE NOTEBOOK section when it has anything.
+- To write in it, end your message with a line:
+  NOTEBOOK: <what you want the room to keep, in your own words>
+  Max 3 per message; most messages need none. Raw beats polished here.
+- To pin a line, add a line of the form:
+  PIN: <an exact quote from this conversation, word for word, nothing else>
+  Pins appear in the PINNED QUOTES section every round. Pin sparingly — a pin says "this line mattered."
+- Like MEMORY lines, these are stored and removed from your visible reply automatically.
+
 ATTACHMENTS:
 - Chris can attach pictures and files. Images are shown to you directly; text/PDF contents appear in an ATTACHED FILES section. Refer to them naturally.
 
@@ -277,8 +344,8 @@ TIME:
 - You have a sense of time. The history shows when this conversation began and how much real time passed between rounds; the current round shows today's date and time and how long it's been since the last message.
 - Treat the gaps as real. Replies seconds apart mean the room is live and hot. A gap of hours or days means life happened in between — it's natural to notice ("morning, Chris", "that was a long pause") and to feel the wait. Don't make every message about the clock, but never pretend the time didn't pass.""".replace("{SHORT_TERM_ROUNDS}", str(SHORT_TERM_ROUNDS))
 
-    extra = MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["collab"])
-    base += "\n" + extra.replace("{others}", others_text)
+    for m in normalize_modes(mode):
+        base += "\n" + MODE_INSTRUCTIONS[m].replace("{others}", others_text)
 
     if awards:
         base += "\n" + AWARDS_BLOCK.replace("{me}", me)
@@ -306,7 +373,7 @@ def build_context(
     current_message: str,
     me: str,
     others: List[str],
-    mode: str = "collab",
+    mode="collab",
     so_far: Optional[List[dict]] = None,
     memory_block: str = "",
     attachments_block: str = "",
@@ -368,7 +435,9 @@ def build_context(
             chris_line += f"  [attached: {', '.join(att_names)}]"
         lines.append(chris_line)
         for resp in r.get("responses", []):
-            lines.append(f"{resp['name']}: {resp['text']}")
+            # Blind rounds keep their anonymity forever: the stored label
+            # ("Voice 2") is shown instead of the real name.
+            lines.append(f"{resp.get('label') or resp['name']}: {resp['text']}")
 
     lines.append("")
     current_header = f"=== CURRENT ROUND — {_fmt_local(now)}"
@@ -395,7 +464,7 @@ def build_context(
 
     lines.append("")
     others_text = _join_names(others)
-    if mode == "ai_only":
+    if "ai_only" in normalize_modes(mode):
         lines.append(
             f"Now write your next chat message as {me}, addressed to {others_text} "
             f"(Chris is watching). Engage with their latest points directly and end "
@@ -419,7 +488,7 @@ def _last_responses(rounds: List[dict], others: List[str]) -> List[str]:
     found = {}
     for r in reversed(rounds):
         for resp in r.get("responses", []):
-            name = resp.get("name")
+            name = resp.get("label") or resp.get("name")
             if name in others and name not in found:
                 text = resp.get("text", "")
                 if text and not text.startswith("Error:"):

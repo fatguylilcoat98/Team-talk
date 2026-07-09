@@ -24,6 +24,7 @@
                 <button id="export-btn" title="Download conversation as Markdown">Export as Markdown</button>
                 <button id="delete-btn" class="danger" title="Delete this session">Delete Session</button>
                 <button id="memory-btn" title="What the AIs remember across sessions">&#129504; Memory</button>
+                <button id="notebook-btn" title="The room's shared scratchpad — raw notes and pinned quotes">&#128211; Notebook</button>
                 <button id="settings-btn" title="API keys and models">&#9881; Settings</button>
             </div>
         </header>
@@ -39,33 +40,38 @@
         </div>
 
         <div class="chat-options">
-            <label>Mode
-                <select id="mode-select" title="How the AIs should behave">
-                    <optgroup label="Serious">
-                        <option value="collab">🤝 Collaborate</option>
-                        <option value="debate">⚔️ Debate</option>
-                        <option value="devils_advocate">😈 Devil's Advocate</option>
-                        <option value="steelman">🛡️ Steelman</option>
-                        <option value="questions">❓ Questions first</option>
-                        <option value="proof">📋 Proof — back it up</option>
-                        <option value="brainstorm">💡 Brainstorm</option>
-                        <option value="consensus">🤝 Find consensus</option>
-                        <option value="courtroom">⚖️ Courtroom</option>
-                        <option value="concrete">🔨 Concrete — no abstractions</option>
-                    </optgroup>
-                    <optgroup label="Fun &amp; Games">
-                        <option value="shoot_the_shit">🍺 Shooting the shit</option>
-                        <option value="roast">😂 Roast Mode</option>
-                        <option value="after_hours">🍻 After Hours</option>
-                        <option value="ai_only">🤖 AIs talk to each other</option>
-                        <option value="battle_royale">🥊 Battle Royale</option>
-                        <option value="method_acting">🎭 Method Acting</option>
-                        <option value="movie_cast">🎬 Movie Cast</option>
-                        <option value="mystery">🕵️ Mystery — catch the liar</option>
-                        <option value="late_night">🎙️ Late Night Panel</option>
-                    </optgroup>
-                </select>
-            </label>
+            <div class="mode-wrap">
+                <span>Modes</span>
+                <details id="mode-picker" class="mode-picker" title="How the AIs should behave — stack up to 3">
+                    <summary id="mode-summary">🤝 Collaborate</summary>
+                    <div class="mode-options">
+                        <span class="mode-note">Pick up to 3 — modes stack.</span>
+                        <span class="mode-group">Serious</span>
+                        <label><input type="checkbox" value="collab"> 🤝 Collaborate (normal)</label>
+                        <label><input type="checkbox" value="debate"> ⚔️ Debate</label>
+                        <label><input type="checkbox" value="hard_truth"> 💊 Hard Truth — no matter what</label>
+                        <label><input type="checkbox" value="devils_advocate"> 😈 Devil's Advocate</label>
+                        <label><input type="checkbox" value="steelman"> 🛡️ Steelman</label>
+                        <label><input type="checkbox" value="questions"> ❓ Questions first</label>
+                        <label><input type="checkbox" value="proof"> 📋 Proof — back it up</label>
+                        <label><input type="checkbox" value="brainstorm"> 💡 Brainstorm</label>
+                        <label><input type="checkbox" value="consensus"> 🤝 Find consensus</label>
+                        <label><input type="checkbox" value="courtroom"> ⚖️ Courtroom</label>
+                        <label><input type="checkbox" value="concrete"> 🔨 Concrete — no abstractions</label>
+                        <span class="mode-group">Fun &amp; Games</span>
+                        <label><input type="checkbox" value="shoot_the_shit"> 🍺 Shooting the shit</label>
+                        <label><input type="checkbox" value="roast"> 😂 Roast Mode</label>
+                        <label><input type="checkbox" value="after_hours"> 🍻 After Hours</label>
+                        <label><input type="checkbox" value="ai_only"> 🤖 AIs talk to each other</label>
+                        <label><input type="checkbox" value="blind"> 🕶️ Blind — anonymous voices</label>
+                        <label><input type="checkbox" value="battle_royale"> 🥊 Battle Royale</label>
+                        <label><input type="checkbox" value="method_acting"> 🎭 Method Acting</label>
+                        <label><input type="checkbox" value="movie_cast"> 🎬 Movie Cast</label>
+                        <label><input type="checkbox" value="mystery"> 🕵️ Mystery — catch the liar</label>
+                        <label><input type="checkbox" value="late_night"> 🎙️ Late Night Panel</label>
+                    </div>
+                </details>
+            </div>
             <label>Turns
                 <select id="turn-select" title="How the AIs take turns">
                     <option value="parallel">⚡ All at once</option>
@@ -102,6 +108,27 @@
             <div id="memory-list" class="memory-list"></div>
             <div class="modal-actions">
                 <button id="memory-clear-btn" class="danger">Forget Everything</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="notebook-overlay" class="overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>&#128211; The Notebook</h2>
+                <button id="notebook-close" class="close-btn" title="Close">&times;</button>
+            </div>
+            <p class="field-note">The shared scratchpad the AIs asked for — everyone writes raw notes in their own words and pins exact quotes that mattered. Stored on your server in <code>memory/notebook.json</code>.</p>
+            <h3 class="nb-heading">&#128204; Pinned quotes</h3>
+            <div id="pin-list" class="memory-list"></div>
+            <h3 class="nb-heading">Notebook entries</h3>
+            <div id="notebook-list" class="memory-list"></div>
+            <div class="nb-add">
+                <input type="text" id="notebook-input" placeholder="Add your own note to the room..." maxlength="500">
+                <button id="notebook-add-btn">Add</button>
+            </div>
+            <div class="modal-actions">
+                <button id="notebook-clear-btn" class="danger">Clear Notebook &amp; Pins</button>
             </div>
         </div>
     </div>

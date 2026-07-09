@@ -27,9 +27,11 @@ from pydantic import BaseModel
 import api_client
 import file_store
 import memory_store
+import notebook_store
 import session_manager
 import settings_store
-from conversation import MODES, build_context, role_notes, system_prompt
+from conversation import (blind_labels, build_context, normalize_modes,
+                          role_notes, system_prompt)
 
 LAN_WARNING = "Do not expose Team Talk publicly unless authentication is added."
 
@@ -56,7 +58,8 @@ async def version():
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
-    mode: Optional[str] = "collab"          # collab | debate | ai_only
+    mode: Optional[str] = "collab"           # single mode (older clients)
+    modes: Optional[List[str]] = None        # stacked modes, e.g. ["hard_truth", "roast"]
     turn_style: Optional[str] = "parallel"  # parallel | sequential
     attachments: Optional[List[str]] = None  # upload ids from /api/upload
     awards: Optional[bool] = True            # live commentary & awards layer
@@ -91,7 +94,7 @@ async def chat(request: ChatRequest):
     message = request.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message is empty")
-    mode = request.mode if request.mode in MODES else "collab"
+    modes = normalize_modes(request.modes if request.modes is not None else request.mode)
     turn_style = request.turn_style if request.turn_style in ("parallel", "sequential") else "parallel"
 
     session = None
@@ -125,19 +128,29 @@ async def chat(request: ChatRequest):
                 })
     attachments_block = file_store.attachments_context(att_metas)
     memory_block = memory_store.context_block()
+    notebook_block = notebook_store.context_block()
+    if notebook_block:
+        memory_block = f"{memory_block}\n\n{notebook_block}" if memory_block else notebook_block
 
     participants = settings_store.get_participants()
-    names = [p["name"] for p in participants]
-    notes = role_notes(mode, participants, session["id"])
 
-    awards = bool(request.awards)
+    # Blind mode: names, personas, roles, and awards are all stripped — the
+    # AIs see (and are) anonymous "Voice N" labels, stable within a session.
+    blind = "blind" in modes
+    labels = blind_labels(participants, session["id"]) if blind else {}
+    display = {p["id"]: (labels.get(p["id"]) or p["name"]) for p in participants}
+    notes = {} if blind else role_notes(modes, participants, session["id"])
+
+    awards = bool(request.awards) and not blind
 
     def prompt_for(p, so_far=None):
-        others = [n for n in names if n != p["name"]]
+        me = display[p["id"]]
+        others = [display[q["id"]] for q in participants if q["id"] != p["id"]]
         return (
-            system_prompt(p["name"], others, mode, persona=p.get("persona"),
+            system_prompt(me, others, modes,
+                          persona=None if blind else p.get("persona"),
                           role_note=notes.get(p["id"]), awards=awards),
-            build_context(history, message, p["name"], others, mode, so_far,
+            build_context(history, message, me, others, modes, so_far,
                           memory_block=memory_block, attachments_block=attachments_block),
         )
 
@@ -151,8 +164,8 @@ async def chat(request: ChatRequest):
             system, ctx = prompt_for(p, so_far)
             result = await api_client.call_participant(p, system, ctx, images=images)
             if result["ok"]:
-                so_far.append({"name": p["name"], "text": result["text"]})
-            responses.append(_response_entry(p, result))
+                so_far.append({"name": display[p["id"]], "text": result["text"]})
+            responses.append(_response_entry(p, result, labels.get(p["id"])))
     else:
         # The core requirement: every AI is called at the same time
         prompts = [prompt_for(p) for p in participants]
@@ -160,16 +173,31 @@ async def chat(request: ChatRequest):
             *[api_client.call_participant(p, s, c, images=images)
               for p, (s, c) in zip(participants, prompts)]
         )
-        responses = [_response_entry(p, r) for p, r in zip(participants, results)]
+        responses = [_response_entry(p, r, labels.get(p["id"]))
+                     for p, r in zip(participants, results)]
 
-    # Long-term memory: strip MEMORY: lines and store them on disk
+    # Long-term memory, notebook entries, and pinned quotes: strip the
+    # MEMORY:/NOTEBOOK:/PIN: lines and store them on disk. In blind mode
+    # everything is credited to the anonymous voice, not the real name.
     for r in responses:
+        author = r.get("label") or r["name"]
         cleaned, memories = memory_store.extract_memories(r["text"])
         if memories:
             r["text"] = cleaned
             for m in memories:
-                memory_store.add(m, r["name"])
+                memory_store.add(m, author)
             r["memories_saved"] = len(memories)
+        cleaned, notes_saved, pins_saved = notebook_store.extract(r["text"])
+        if notes_saved or pins_saved:
+            r["text"] = cleaned
+            for n in notes_saved:
+                notebook_store.add_entry(n, author)
+            for q in pins_saved:
+                notebook_store.add_pin(q, author)
+            if notes_saved:
+                r["notebook_saved"] = len(notes_saved)
+            if pins_saved:
+                r["pins_saved"] = len(pins_saved)
 
     ok_count = sum(1 for r in responses if not r["text"].startswith("Error:"))
     if ok_count == len(responses):
@@ -183,7 +211,8 @@ async def chat(request: ChatRequest):
         "round": round_number,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "chris_message": message,
-        "mode": mode,
+        "mode": modes[0],   # older readers see the primary mode
+        "modes": modes,
         "turn_style": turn_style,
         "awards": awards,
         "attachments": [
@@ -199,7 +228,7 @@ async def chat(request: ChatRequest):
     return {"session_id": session["id"], "status": status, **round_data}
 
 
-def _response_entry(p: dict, result: dict) -> dict:
+def _response_entry(p: dict, result: dict, label: Optional[str] = None) -> dict:
     entry = {
         "id": p["id"],
         "name": p["name"],
@@ -207,7 +236,12 @@ def _response_entry(p: dict, result: dict) -> dict:
         "tokens": result["tokens"],
         "color": p.get("color", "#93a0b8"),
     }
-    if p.get("persona"):
+    if label:
+        # Blind round: anonymous label, neutral color (the real color would
+        # give the identity away), and no persona badge.
+        entry["label"] = label
+        entry["color"] = "#8a93a5"
+    elif p.get("persona"):
         entry["persona"] = p["persona"]
     return entry
 
@@ -332,6 +366,45 @@ async def delete_memory(memory_id: str):
 @app.delete("/api/memory")
 async def clear_memory():
     removed = memory_store.clear()
+    return {"status": "cleared", "removed": removed}
+
+
+# --- The Notebook (shared scratchpad + pinned quotes) -----------------------
+
+class NotebookAdd(BaseModel):
+    text: str
+
+
+@app.get("/api/notebook")
+async def get_notebook():
+    return notebook_store.list_all()
+
+
+@app.post("/api/notebook")
+async def add_notebook_entry(body: NotebookAdd):
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Entry is empty")
+    return notebook_store.add_entry(text, "Chris")
+
+
+@app.delete("/api/notebook/entries/{entry_id}")
+async def delete_notebook_entry(entry_id: str):
+    if not notebook_store.delete_entry(entry_id):
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "deleted"}
+
+
+@app.delete("/api/notebook/pins/{pin_id}")
+async def delete_notebook_pin(pin_id: str):
+    if not notebook_store.delete_pin(pin_id):
+        raise HTTPException(status_code=404, detail="Pin not found")
+    return {"status": "deleted"}
+
+
+@app.delete("/api/notebook")
+async def clear_notebook():
+    removed = notebook_store.clear()
     return {"status": "cleared", "removed": removed}
 
 
