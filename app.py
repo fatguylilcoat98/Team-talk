@@ -25,13 +25,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import api_client
+import brain
+import episode_store
 import file_store
 import memory_store
 import notebook_store
 import session_manager
 import settings_store
-from conversation import (blind_labels, build_context, normalize_modes,
-                          role_notes, system_prompt)
+from conversation import (SHORT_TERM_ROUNDS, blind_labels, build_context,
+                          normalize_modes, role_notes, system_prompt)
 
 LAN_WARNING = "Do not expose Team Talk publicly unless authentication is added."
 
@@ -127,10 +129,27 @@ async def chat(request: ChatRequest):
                     "data": base64.standard_b64encode(raw).decode("ascii"),
                 })
     attachments_block = file_store.attachments_context(att_metas)
-    memory_block = memory_store.context_block()
-    notebook_block = notebook_store.context_block()
-    if notebook_block:
-        memory_block = f"{memory_block}\n\n{notebook_block}" if memory_block else notebook_block
+
+    # --- The room brain: ONE shared pass per round (Splendor architecture,
+    # everything on this server's disk). Embed the message, rank memories and
+    # past-session episodes by relevance, measure novelty, run the background
+    # DMN reflection. All of it degrades to the pre-brain behavior when the
+    # OpenAI key is missing or a call fails.
+    query_vec = await brain.embed(message)
+    memory_task = brain.ranked_memory_block(query_vec, memory_store.list_memories())
+    episodes_task = brain.ranked_episodes(query_vec, episode_store.list_episodes(),
+                                          exclude_session=session["id"])
+    novelty_task = brain.novelty(query_vec, history)
+    dmn_task = brain.dmn_whisper(message, history[-1]["chris_message"] if history else "")
+    memory_block, cross_episodes, novelty_score, whisper = await asyncio.gather(
+        memory_task, episodes_task, novelty_task, dmn_task)
+
+    for block in (episode_store.episodes_block(cross_episodes),
+                  notebook_store.context_block(),
+                  brain.room_sense_block(novelty_score, whisper)):
+        if block:
+            memory_block = f"{memory_block}\n\n{block}" if memory_block else block
+    episodes_block = episode_store.session_block(session["id"])
 
     participants = settings_store.get_participants()
 
@@ -151,7 +170,8 @@ async def chat(request: ChatRequest):
                           persona=None if blind else p.get("persona"),
                           role_note=notes.get(p["id"]), awards=awards),
             build_context(history, message, me, others, modes, so_far,
-                          memory_block=memory_block, attachments_block=attachments_block),
+                          memory_block=memory_block, attachments_block=attachments_block,
+                          episodes_block=episodes_block),
         )
 
     responses = []
@@ -225,7 +245,25 @@ async def chat(request: ChatRequest):
     session["rounds"].append(round_data)
     await session_manager.save_session(session)
 
+    # Episodic compression, fire-and-forget: rounds that aged out of the
+    # verbatim window get summarized so the next round can still see them.
+    asyncio.create_task(_compress_session(session["id"], list(session["rounds"])))
+
     return {"session_id": session["id"], "status": status, **round_data}
+
+
+async def _compress_session(session_id: str, rounds: List[dict]) -> None:
+    try:
+        chunk = episode_store.pending_chunk(session_id, rounds, SHORT_TERM_ROUNDS)
+        if not chunk:
+            return
+        summary = await brain.summarize_rounds(chunk)
+        if summary:
+            ep = episode_store.add(session_id, chunk[0].get("round") or 0,
+                                   chunk[-1].get("round") or 0, summary)
+            print(f"[BRAIN] compressed rounds {ep['first_round']}–{ep['last_round']} of {session_id}")
+    except Exception as e:
+        print(f"[BRAIN] compression skipped: {e}")
 
 
 def _response_entry(p: dict, result: dict, label: Optional[str] = None) -> dict:
@@ -351,9 +389,22 @@ async def serve_upload(file_id: str):
 
 # --- Memory -------------------------------------------------------------------
 
+class MemoryAdd(BaseModel):
+    text: str
+
+
 @app.get("/api/memory")
 async def get_memory():
     return {"memories": memory_store.list_memories()}
+
+
+@app.post("/api/memory")
+async def add_memory(body: MemoryAdd):
+    """Chris states a fact directly — saved with [stated] provenance."""
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Memory is empty")
+    return memory_store.add(text, "Chris", kind="chris_stated")
 
 
 @app.delete("/api/memory/{memory_id}")

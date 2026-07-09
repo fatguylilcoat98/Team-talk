@@ -849,7 +849,8 @@ async function renderMemories() {
             text.textContent = m.text;
             const meta = document.createElement('div');
             meta.className = 'memory-meta';
-            meta.textContent = `${m.by} · ${(m.created_at || '').slice(0, 10)}`;
+            const tag = m.kind === 'chris_stated' ? ' · stated' : ' · observed';
+            meta.textContent = `${m.by} · ${(m.created_at || '').slice(0, 10)}${tag}`;
             const del = document.createElement('button');
             del.className = 'memory-del danger';
             del.textContent = '×';
@@ -872,6 +873,23 @@ memoryClearBtn.addEventListener('click', async () => {
     if (!confirm('Delete ALL long-term memories? The AIs will forget everything saved so far.')) return;
     await fetch('/api/memory', { method: 'DELETE' });
     renderMemories();
+});
+
+const memoryInput = document.getElementById('memory-input');
+const memoryAddBtn = document.getElementById('memory-add-btn');
+memoryAddBtn.addEventListener('click', async () => {
+    const text = memoryInput.value.trim();
+    if (!text) return;
+    await fetch('/api/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+    });
+    memoryInput.value = '';
+    renderMemories();
+});
+memoryInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') memoryAddBtn.click();
 });
 
 // --- The Notebook (shared scratchpad + pinned quotes) ------------------------

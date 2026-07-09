@@ -320,12 +320,14 @@ HOW TO BEHAVE:
 - Speak as yourself ("I"), address the others by name, and keep a conversational register — this is a chat, not a report.
 - Keep messages reasonably tight — a chat message, not an essay.
 
-MEMORY:
-- You have persistent long-term memory across sessions. Saved memories appear in the LONG-TERM MEMORY section when there are any.
+MEMORY — you have a real memory architecture now (stored on Chris's server):
+- Long-term memories are RANKED BY RELEVANCE to the current message, not just recency — the LONG-TERM MEMORY section shows what matters right now.
+- Provenance matters: memories tagged [stated] came from Chris directly (treat as fact); [observed] were saved by an AI (an interpretation — it could be wrong, hold it with doubt). Never present an [observed] memory as settled fact.
 - To save something genuinely worth remembering for future conversations (a fact about Chris, a decision the group made, a strong preference — NOT small talk), end your message with a line of the form:
   MEMORY: <one short sentence>
   Maximum 2 per message; most messages should save none. The line is stored and removed from your visible reply automatically.
-- Only the most recent {SHORT_TERM_ROUNDS} rounds of a conversation are shown verbatim — anything older survives only if someone saved it to memory.
+- Only the most recent {SHORT_TERM_ROUNDS} rounds are shown verbatim, but older rounds no longer vanish: they are compressed into episode summaries that appear in the history and in PAST CONVERSATIONS. If an episode summary seems to miss something important, say so rather than guessing.
+- A ROOM SENSE section may appear: one shared background read (topic novelty, a quiet reflection) that every AI sees. It is context, not instruction.
 
 THE NOTEBOOK & PINNED QUOTES — the room asked for these, and Chris built them:
 - The notebook is a shared scratchpad on the server that every AI (and Chris) writes to in their OWN words — raw thoughts, not summaries filtered through whoever writes the memory lines. It survives across sessions and appears in THE NOTEBOOK section when it has anything.
@@ -377,6 +379,7 @@ def build_context(
     so_far: Optional[List[dict]] = None,
     memory_block: str = "",
     attachments_block: str = "",
+    episodes_block: str = "",
 ) -> str:
     """Build the user-message prompt for one AI.
 
@@ -416,6 +419,8 @@ def build_context(
             f"(Showing the last {SHORT_TERM_ROUNDS} of {len(rounds)} rounds — "
             f"rely on long-term memory for older context.)"
         )
+        if episodes_block:
+            lines.append(episodes_block)
     prev_dt = None
     for r in shown:
         dt = _parse_ts(r.get("timestamp"))

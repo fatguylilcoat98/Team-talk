@@ -50,9 +50,13 @@ def list_memories() -> List[dict]:
     return _load()
 
 
-def add(text: str, by: str) -> dict:
+def add(text: str, by: str, kind: str = "ai_observed") -> dict:
+    """kind: "chris_stated" (Chris said it directly — fact) or "ai_observed"
+    (an AI's own interpretation — carries doubt). Provenance, Splendor-style."""
     text = text.strip()[:MAX_MEMORY_CHARS]
-    entry = {"id": uuid.uuid4().hex[:12], "text": text, "by": by, "created_at": _now()}
+    entry = {"id": uuid.uuid4().hex[:12], "text": text, "by": by,
+             "kind": kind if kind in ("chris_stated", "ai_observed") else "ai_observed",
+             "created_at": _now()}
     entries = _load()
     entries.append(entry)
     _save(entries)
