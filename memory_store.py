@@ -63,19 +63,41 @@ def add(text: str, by: str, kind: str = "ai_observed") -> dict:
     return entry
 
 
-def delete(memory_id: str) -> bool:
-    entries = _load()
-    kept = [e for e in entries if e.get("id") != memory_id]
-    if len(kept) == len(entries):
-        return False
-    _save(kept)
-    return True
+def _tombstone(entry: dict, reason: str, authority: str) -> dict:
+    """The content goes. The fact that it existed — and went — does not."""
+    return {
+        "id": entry.get("id"),
+        "tombstone": True,
+        "removed_at": _now(),
+        "reason": (reason or "removed")[:200],
+        "authority": (authority or "Chris")[:60],
+        "original_by": entry.get("by"),
+        "original_created_at": entry.get("created_at"),
+    }
 
 
-def clear() -> int:
+def delete(memory_id: str, reason: str = "removed by Chris via the Memory panel",
+           authority: str = "Chris") -> bool:
     entries = _load()
-    _save([])
-    return len(entries)
+    changed = False
+    for i, e in enumerate(entries):
+        if e.get("id") == memory_id and not e.get("tombstone"):
+            entries[i] = _tombstone(e, reason, authority)
+            changed = True
+    if changed:
+        _save(entries)
+    return changed
+
+
+def clear(reason: str = "Chris cleared all memories", authority: str = "Chris") -> int:
+    entries = _load()
+    removed = 0
+    for i, e in enumerate(entries):
+        if not e.get("tombstone"):
+            entries[i] = _tombstone(e, reason, authority)
+            removed += 1
+    _save(entries)
+    return removed
 
 
 def extract_memories(text: str) -> Tuple[str, List[str]]:
@@ -93,7 +115,7 @@ def extract_memories(text: str) -> Tuple[str, List[str]]:
 
 def context_block() -> str:
     """The memory section injected at the top of every AI's context."""
-    entries = _load()[-CONTEXT_ENTRIES:]
+    entries = [e for e in _load() if not e.get("tombstone")][-CONTEXT_ENTRIES:]
     if not entries:
         return ""
     lines = ["=== LONG-TERM MEMORY (saved in past conversations) ==="]

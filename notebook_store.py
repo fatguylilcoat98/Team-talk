@@ -86,30 +86,54 @@ def add_pin(text: str, by: str) -> dict:
     return pin
 
 
-def delete_entry(entry_id: str) -> bool:
+def _tombstone(item: dict, reason: str, authority: str) -> dict:
+    """Content may disappear. History never does."""
+    return {
+        "id": item.get("id"),
+        "tombstone": True,
+        "removed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "reason": (reason or "removed")[:200],
+        "authority": (authority or "Chris")[:60],
+        "original_by": item.get("by"),
+        "original_created_at": item.get("created_at"),
+    }
+
+
+def delete_entry(entry_id: str, reason: str = "removed by Chris via the Notebook panel",
+                 authority: str = "Chris") -> bool:
     data = _load()
-    kept = [e for e in data["entries"] if e.get("id") != entry_id]
-    if len(kept) == len(data["entries"]):
-        return False
-    data["entries"] = kept
+    changed = False
+    for i, e in enumerate(data["entries"]):
+        if e.get("id") == entry_id and not e.get("tombstone"):
+            data["entries"][i] = _tombstone(e, reason, authority)
+            changed = True
+    if changed:
+        _save(data)
+    return changed
+
+
+def delete_pin(pin_id: str, reason: str = "removed by Chris via the Notebook panel",
+               authority: str = "Chris") -> bool:
+    data = _load()
+    changed = False
+    for i, p in enumerate(data["pins"]):
+        if p.get("id") == pin_id and not p.get("tombstone"):
+            data["pins"][i] = _tombstone(p, reason, authority)
+            changed = True
+    if changed:
+        _save(data)
+    return changed
+
+
+def clear(reason: str = "Chris cleared the notebook", authority: str = "Chris") -> int:
+    data = _load()
+    removed = 0
+    for key in ("entries", "pins"):
+        for i, item in enumerate(data[key]):
+            if not item.get("tombstone"):
+                data[key][i] = _tombstone(item, reason, authority)
+                removed += 1
     _save(data)
-    return True
-
-
-def delete_pin(pin_id: str) -> bool:
-    data = _load()
-    kept = [p for p in data["pins"] if p.get("id") != pin_id]
-    if len(kept) == len(data["pins"]):
-        return False
-    data["pins"] = kept
-    _save(data)
-    return True
-
-
-def clear() -> int:
-    data = _load()
-    removed = len(data["entries"]) + len(data["pins"])
-    _save({"entries": [], "pins": []})
     return removed
 
 
@@ -133,13 +157,13 @@ def context_block() -> str:
     data = _load()
     lines = []
     import brain
-    pins = data["pins"][-CONTEXT_PINS:]
+    pins = [p for p in data["pins"] if not p.get("tombstone")][-CONTEXT_PINS:]
     if pins:
         lines.append("=== PINNED QUOTES (exact lines the room chose to keep) ===")
         for p in pins:
             when = brain.fmt_ts(p.get("created_at", ""))
             lines.append(f'- "{p.get("text", "")}" (pinned by {p.get("by", "?")}, {when})')
-    entries = data["entries"][-CONTEXT_ENTRIES:]
+    entries = [e for e in data["entries"] if not e.get("tombstone")][-CONTEXT_ENTRIES:]
     if entries:
         if lines:
             lines.append("")
