@@ -11,6 +11,7 @@ import json
 import re
 from typing import List, Tuple
 
+import history_store
 import ledger
 import wall_store
 
@@ -18,7 +19,7 @@ MAX_PER_MESSAGE = 2
 
 _ACTION_LINE = re.compile(r"^[ \t]*ROOM_ACTION:[ \t]*(\{.*\})[ \t]*$", re.MULTILINE)
 
-ALLOWED_ACTIONS = {"create_note", "reply_to_note", "connect_notes"}
+ALLOWED_ACTIONS = {"create_note", "reply_to_note", "connect_notes", "history_entry"}
 
 
 def extract_and_apply(text: str, actor: str, session_id: str) -> Tuple[str, List[dict]]:
@@ -68,6 +69,20 @@ def _apply(payload: dict, actor: str, session_id: str) -> dict:
         ledger.append(actor, "notebook_written", ref=f"wall/{payload.get('note_id')}/reply",
                       detail={"text": str(payload.get('text'))[:200]})
         return {"action": action, "ok": True, "detail": r["id"]}
+
+    if action == "history_entry":
+        entry = history_store.recommend(
+            str(payload.get("title") or ""), str(payload.get("body") or ""),
+            recommended_by=actor,
+            importance=payload.get("importance") or 3,
+            related=payload.get("related") or [],
+            session_id=session_id)
+        if not entry:
+            return _reject(actor, action, "title and body required")
+        ledger.append(actor, "history_recommended", ref=entry["id"],
+                      detail={"title": entry["title"][:120]})
+        return {"action": action, "ok": True,
+                "detail": f"{entry['id']} — submitted for Chris's approval"}
 
     if action == "connect_notes":
         conn = wall_store.connect(actor,

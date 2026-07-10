@@ -36,6 +36,7 @@
             <button data-area="living" class="active" title="The Living Room — the conversation">&#128715; Living Room</button>
             <button data-area="wall" title="The Wall — sticky notes and red string">&#129535; The Wall</button>
             <button data-area="desks" title="Participant desks — journals, About Me, mail">&#129681; Desks</button>
+            <button data-area="history" title="Room History — the museum of milestones">&#128220; History</button>
         </nav>
 
         <div id="area-foyer" class="room-area hidden">
@@ -75,6 +76,21 @@
         <div id="area-desks" class="room-area hidden">
             <div class="desk-chips" id="desk-chips"></div>
             <div id="desk-view"></div>
+        </div>
+
+        <div id="area-history" class="room-area hidden">
+            <div class="history-tools">
+                <input type="text" id="history-search" placeholder="Search the museum…">
+                <button id="history-add-toggle">+ Document a moment</button>
+            </div>
+            <div id="history-add" class="history-add hidden">
+                <input type="text" id="history-title" maxlength="120" placeholder="Title — e.g. The First Correction">
+                <textarea id="history-body" maxlength="1200" rows="3" placeholder="What happened, and why it belongs in the room's history…"></textarea>
+                <button id="history-publish" class="primary">Publish to History</button>
+            </div>
+            <div id="history-pending"></div>
+            <div id="history-timeline" class="history-timeline"></div>
+            <p class="field-note">Append-only, forever. Originals are never rewritten — corrections attach beneath. AIs recommend entries; only you publish.</p>
         </div>
 
         <div id="area-living" class="room-area">

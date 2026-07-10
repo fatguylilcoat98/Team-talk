@@ -1374,3 +1374,132 @@ button.danger:hover {
     .room-nav::-webkit-scrollbar { display: none; }
     .room-nav button { flex: 0 0 auto; min-width: 24%; }
 }
+
+/* --- 📜 Room History (the museum) --- */
+.history-tools {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.history-tools input {
+    flex: 1;
+    min-width: 140px;
+    font: inherit;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+}
+
+.history-add {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.history-add input, .history-add textarea {
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    resize: vertical;
+}
+
+.history-add .primary {
+    background: var(--chris);
+    color: #1a1408;
+    border: none;
+    font-weight: 600;
+    align-self: flex-start;
+}
+
+.history-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-left: 2px solid rgba(232, 176, 75, 0.35);
+    padding-left: 16px;
+    margin-left: 6px;
+}
+
+.history-card {
+    position: relative;
+    background: linear-gradient(160deg, #1c2130 0%, #191d29 100%);
+    border: 1px solid rgba(232, 176, 75, 0.25);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.history-card::before {
+    content: "";
+    position: absolute;
+    left: -22px;
+    top: 20px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--chris);
+    box-shadow: 0 0 8px rgba(232, 176, 75, 0.6);
+}
+
+.pending-card {
+    border-style: dashed;
+    opacity: 0.92;
+}
+
+.history-date {
+    color: var(--chris);
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.history-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    font-style: italic;
+}
+
+.history-body {
+    font-size: 0.92rem;
+    color: #cdd6e4;
+    white-space: pre-wrap;
+}
+
+.history-related {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.history-correction {
+    border-left: 3px solid var(--danger);
+    background: rgba(208, 85, 85, 0.07);
+    border-radius: 0 8px 8px 0;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+
+.history-fix {
+    align-self: flex-start;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    opacity: 0.7;
+}
+
+@media (max-width: 800px) {
+    .room-nav button { min-width: 21%; }
+}

@@ -37,6 +37,8 @@ ACTIONS = {
     "directors_cut_wrapped", "tombstone_placed",
     "connection_created", "room_action_rejected", "mailbox_sent",
     "about_me_written", "room_context_changed",
+    "history_recommended", "history_published", "history_rejected",
+    "history_corrected",
 }
 
 

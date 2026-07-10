@@ -31,6 +31,7 @@ import brain
 import director
 import episode_store
 import file_store
+import history_store
 import journal_store
 import ledger
 import mailbox_store
@@ -189,6 +190,7 @@ async def chat(request: ChatRequest):
     for block in (episode_store.episodes_block(cross_episodes),
                   notebook_store.context_block(),
                   wall_store.context_block(),
+                  history_store.context_block(),
                   questions_store.context_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
@@ -602,6 +604,8 @@ async def foyer():
         "ledger_events": chain["length"],
         "journal_entries": journal_entries,
         "sessions": len(await session_manager.list_sessions()),
+        "history_published": len(history_store.list_entries("published")),
+        "history_pending": len(history_store.list_entries("pending")),
         "version": APP_VERSION,
         "location_setting": settings_store.resolve("location", "ROOM_LOCATION", "") or "",
     }
@@ -691,6 +695,83 @@ async def create_wall_connection(body: ConnectionCreate):
     ledger.append("Chris", "connection_created", ref=conn["id"],
                   detail={"type": conn["type"], "from": conn["from"], "to": conn["to"]})
     return conn
+
+
+class HistoryCreate(BaseModel):
+    title: str
+    body: str
+    importance: Optional[int] = 3
+    related: Optional[List[str]] = None
+
+
+class HistoryReject(BaseModel):
+    reason: Optional[str] = ""
+
+
+class HistoryCorrection(BaseModel):
+    text: str
+
+
+def _pid_for_name(name: str) -> Optional[str]:
+    roster = {p["name"].lower(): p["id"] for p in settings_store.get_participants()}
+    roster.update({"splendor": "splendor", "director": "director"})
+    return roster.get((name or "").lower())
+
+
+@app.get("/api/history")
+async def get_history():
+    return {"entries": history_store.list_entries()}
+
+
+@app.post("/api/history")
+async def create_history(body: HistoryCreate):
+    entry = history_store.publish_direct(body.title, body.body, "Chris",
+                                         body.importance or 3, body.related)
+    if not entry:
+        raise HTTPException(status_code=400, detail="Title and body required")
+    ledger.append("Chris", "history_published", ref=entry["id"],
+                  detail={"title": entry["title"][:120], "direct": True})
+    return entry
+
+
+@app.post("/api/history/{entry_id}/approve")
+async def approve_history(entry_id: str):
+    entry = history_store.approve(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Pending entry not found")
+    ledger.append("Chris", "history_published", ref=entry["id"],
+                  detail={"title": entry["title"][:120],
+                          "recommended_by": entry["recommended_by"]})
+    pid = _pid_for_name(entry["recommended_by"])
+    if pid:
+        receipt_store.issue(pid, "history_entry_approved", "success",
+                            {"entry_id": entry["id"], "title": entry["title"][:80]})
+    return entry
+
+
+@app.post("/api/history/{entry_id}/reject")
+async def reject_history(entry_id: str, body: HistoryReject):
+    entry = history_store.reject(entry_id, body.reason or "")
+    if not entry:
+        raise HTTPException(status_code=404, detail="Pending entry not found")
+    ledger.append("Chris", "history_rejected", ref=entry["id"],
+                  detail={"reason": entry["rejected_reason"]})
+    pid = _pid_for_name(entry["recommended_by"])
+    if pid:
+        receipt_store.issue(pid, "history_entry_approved", "rejected",
+                            {"entry_id": entry["id"],
+                             "reason": entry["rejected_reason"]})
+    return entry
+
+
+@app.post("/api/history/{entry_id}/corrections")
+async def correct_history(entry_id: str, body: HistoryCorrection):
+    correction = history_store.correct(entry_id, "Chris", body.text)
+    if not correction:
+        raise HTTPException(status_code=404, detail="Published entry not found or empty correction")
+    ledger.append("Chris", "history_corrected", ref=entry_id,
+                  detail={"text": body.text[:200]})
+    return correction
 
 
 @app.get("/api/desks/{participant_id}")

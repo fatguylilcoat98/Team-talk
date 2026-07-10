@@ -1531,7 +1531,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1545,6 +1545,7 @@ function showArea(area) {
     if (area === 'foyer') renderFoyer();
     if (area === 'wall') renderWall();
     if (area === 'desks') renderDeskChips();
+    if (area === 'history') renderHistory();
 }
 
 roomNav.addEventListener('click', (e) => {
@@ -1893,6 +1894,122 @@ async function renderDesk(pid) {
         view.innerHTML = `<p class="field-note">Could not open desk: ${escapeText(err.message)}</p>`;
     }
 }
+
+// --- 📜 Room History (the museum)
+let historyEntries = [];
+
+async function renderHistory() {
+    const timeline = document.getElementById('history-timeline');
+    const pendingDiv = document.getElementById('history-pending');
+    timeline.innerHTML = '<p class="field-note">Opening the museum…</p>';
+    pendingDiv.innerHTML = '';
+    try {
+        const res = await fetch('/api/history');
+        historyEntries = (await res.json()).entries || [];
+    } catch (err) {
+        timeline.innerHTML = `<p class="field-note">Could not load history: ${escapeText(err.message)}</p>`;
+        return;
+    }
+    const pending = historyEntries.filter((e) => e.status === 'pending');
+    if (pending.length) {
+        pendingDiv.innerHTML = '<h4 class="nb-heading">⏳ Recommended — awaiting your approval</h4>';
+        for (const e of pending) {
+            const card = document.createElement('div');
+            card.className = 'history-card pending-card';
+            card.innerHTML = `<div class="history-title">${escapeText(e.title)}</div>`
+                + `<div class="history-body">${escapeText(e.body)}</div>`
+                + `<div class="memory-meta">recommended by ${escapeText(e.recommended_by)} · ${(e.ts || '').slice(0, 10)}</div>`;
+            const actions = document.createElement('div');
+            actions.className = 'clip-actions';
+            const ok = document.createElement('button');
+            ok.textContent = '✓ Publish';
+            ok.addEventListener('click', async () => {
+                await fetch(`/api/history/${encodeURIComponent(e.id)}/approve`, { method: 'POST' });
+                renderHistory();
+            });
+            const no = document.createElement('button');
+            no.textContent = '✗ Decline';
+            no.className = 'danger';
+            no.addEventListener('click', async () => {
+                const reason = prompt('Why not? (goes on the record — history keeps its drafts)', 'not a milestone');
+                if (reason === null) return;
+                await fetch(`/api/history/${encodeURIComponent(e.id)}/reject`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason }) });
+                renderHistory();
+            });
+            actions.appendChild(ok); actions.appendChild(no);
+            card.appendChild(actions);
+            pendingDiv.appendChild(card);
+        }
+    }
+    renderTimeline();
+}
+
+function renderTimeline() {
+    const timeline = document.getElementById('history-timeline');
+    const q = (document.getElementById('history-search').value || '').toLowerCase();
+    timeline.innerHTML = '';
+    const published = historyEntries
+        .filter((e) => e.status === 'published')
+        .filter((e) => !q || (e.title + ' ' + e.body).toLowerCase().includes(q))
+        .sort((a, b) => (b.published_at || '').localeCompare(a.published_at || ''));
+    if (!published.length) {
+        timeline.innerHTML = '<p class="field-note">The museum is empty. Document the first moment — or wait for the room to recommend one.</p>';
+        return;
+    }
+    for (const e of published) {
+        const card = document.createElement('div');
+        card.className = 'history-card';
+        const date = new Date((e.published_at || e.ts || '').replace('Z', '+00:00'));
+        const dateStr = isNaN(date) ? (e.published_at || '').slice(0, 10)
+            : date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+        const credit = e.recommended_by === e.approved_by
+            ? `Documented by ${escapeText(e.author)}`
+            : `Recommended by ${escapeText(e.recommended_by)} · approved by ${escapeText(e.approved_by)}`;
+        card.innerHTML = `<div class="history-date">📜 ${escapeText(dateStr)}</div>`
+            + `<div class="history-title">“${escapeText(e.title)}”</div>`
+            + `<div class="history-body">${escapeText(e.body)}</div>`
+            + `<div class="memory-meta">${credit}</div>`
+            + ((e.related || []).length ? `<div class="history-related">${e.related.map((r) => `<span class="chip">${escapeText(r)}</span>`).join(' ')}</div>` : '');
+        for (const c of e.corrections || []) {
+            const corr = document.createElement('div');
+            corr.className = 'history-correction';
+            corr.innerHTML = `<strong>Correction</strong> · ${(c.ts || '').slice(0, 10)} · ${escapeText(c.author)}<br>${escapeText(c.text)}`;
+            card.appendChild(corr);
+        }
+        const fix = document.createElement('button');
+        fix.className = 'history-fix';
+        fix.textContent = '± Attach correction';
+        fix.addEventListener('click', async () => {
+            const text = prompt('The original stays. Your correction attaches beneath it:');
+            if (!text || !text.trim()) return;
+            await fetch(`/api/history/${encodeURIComponent(e.id)}/corrections`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text.trim() }) });
+            renderHistory();
+        });
+        card.appendChild(fix);
+        timeline.appendChild(card);
+    }
+}
+
+document.getElementById('history-search').addEventListener('input', renderTimeline);
+document.getElementById('history-add-toggle').addEventListener('click', () =>
+    document.getElementById('history-add').classList.toggle('hidden'));
+document.getElementById('history-publish').addEventListener('click', async () => {
+    const title = document.getElementById('history-title').value.trim();
+    const body = document.getElementById('history-body').value.trim();
+    if (!title || !body) return;
+    await fetch('/api/history', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body }),
+    });
+    document.getElementById('history-title').value = '';
+    document.getElementById('history-body').value = '';
+    document.getElementById('history-add').classList.add('hidden');
+    renderHistory();
+});
 
 showArea(localStorage.getItem('teamtalk-area') || 'living');
 
