@@ -1362,3 +1362,15 @@ button.danger:hover {
 @media (max-width: 800px) {
     .room-nav { top: auto; }
 }
+
+/* nav overflow: scroll with edge fade so hidden tabs are discoverable */
+@media (max-width: 800px) {
+    .room-nav {
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(90deg, #000 0, #000 92%, transparent 100%);
+        mask-image: linear-gradient(90deg, #000 0, #000 92%, transparent 100%);
+    }
+    .room-nav::-webkit-scrollbar { display: none; }
+    .room-nav button { flex: 0 0 auto; min-width: 24%; }
+}
