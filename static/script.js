@@ -351,6 +351,7 @@ async function sendMessage() {
                 turn_style: turnSelect.value,
                 awards: awardsToggle.checked,
                 via_splendor: splendorToggle.checked,
+                room_context: deviceContext(),
                 attachments: sentAttachments.map((a) => a.id),
             }),
         });
@@ -577,6 +578,14 @@ function aiBubble(resp, allNames = [], reveal = false) {
         if (resp.pins_saved) extra += '  ·  📌 pinned a quote';
         if (resp.journal_saved) extra += '  ·  📔 wrote in their journal';
         if (resp.questions_asked) extra += '  ·  ❓ asked Chris a question';
+        if (resp.mail_sent) extra += '  ·  📬 left mail';
+        if (resp.about_written) extra += '  ·  🪪 updated About Me';
+        if (resp.room_actions) {
+            const ok = resp.room_actions.filter((a) => a.ok).length;
+            const bad = resp.room_actions.length - ok;
+            if (ok) extra += `  ·  🧷 ${ok} wall action${ok > 1 ? 's' : ''}`;
+            if (bad) extra += `  ·  ⚠ ${bad} rejected action${bad > 1 ? 's' : ''}`;
+        }
         t.textContent = `tokens: ${resp.tokens}${extra}`;
         el.appendChild(t);
     }
@@ -676,6 +685,9 @@ function applySettingsSnapshot(data) {
     openaiKeyNote.textContent = keyNoteText(data.openai_api_key_masked, data.openai_key_source);
     hostInput.value = data.host || '';
     portInput.value = data.port || '';
+    roomLocation = data.location || '';
+    const locInput = document.getElementById('set-location');
+    if (locInput) locInput.value = roomLocation;
 
     participantsCache = data.participants || [];
     renderLegend();
@@ -848,6 +860,7 @@ saveSettingsBtn.addEventListener('click', async () => {
     if (openaiKeyInput.value.trim()) payload.openai_api_key = openaiKeyInput.value.trim();
     if (hostInput.value.trim()) payload.host = hostInput.value.trim();
     if (portInput.value) payload.port = parseInt(portInput.value, 10);
+    payload.location = document.getElementById('set-location').value.trim();
 
     saveSettingsBtn.disabled = true;
     setSettingsStatus('Saving...');
@@ -1499,6 +1512,359 @@ async function renderLedger() {
         ledgerChain.textContent = `Could not load ledger: ${err.message}`;
     }
 }
+
+// --- 🏛 THE ROOM ---------------------------------------------------------------
+
+let roomLocation = '';
+
+function deviceContext() {
+    const now = new Date();
+    return {
+        local_date: now.toLocaleDateString(undefined,
+            { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+        local_time: now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }),
+        tz: (Intl.DateTimeFormat().resolvedOptions().timeZone) || '',
+        location: roomLocation || null,
+        location_source: roomLocation ? 'set by Chris in Settings' : 'not set',
+    };
+}
+
+// --- Area navigation
+const roomNav = document.querySelector('.room-nav');
+const AREAS = ['foyer', 'living', 'wall', 'desks'];
+
+function showArea(area) {
+    if (!AREAS.includes(area)) area = 'living';
+    for (const a of AREAS) {
+        document.getElementById(`area-${a}`).classList.toggle('hidden', a !== area);
+    }
+    for (const btn of roomNav.querySelectorAll('button')) {
+        btn.classList.toggle('active', btn.dataset.area === area);
+    }
+    localStorage.setItem('teamtalk-area', area);
+    if (area === 'foyer') renderFoyer();
+    if (area === 'wall') renderWall();
+    if (area === 'desks') renderDeskChips();
+}
+
+roomNav.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-area]');
+    if (btn) showArea(btn.dataset.area);
+});
+
+// --- The Foyer Board
+async function renderFoyer() {
+    const ctx = deviceContext();
+    document.getElementById('foyer-clock').textContent = `${ctx.local_date} · ${ctx.local_time}`;
+    document.getElementById('foyer-loc').textContent = ctx.location
+        ? `${ctx.location} · ${ctx.tz} · ${ctx.location_source}`
+        : `${ctx.tz} · location not set (⚙ Settings)`;
+    const grid = document.getElementById('foyer-grid');
+    try {
+        const res = await fetch('/api/foyer');
+        const f = await res.json();
+        roomLocation = roomLocation || f.location_setting || '';
+        const rows = [
+            ['CURRENT SESSION', currentSessionId || 'none — the floor is open'],
+            ['OPEN ITEMS', `${f.open_questions} question${f.open_questions === 1 ? '' : 's'} for Chris · ${f.unread_mail} unread mail · ${f.wall_notes_open} open wall notes`],
+            ['THE WALL', `${f.wall_notes_total} notes · ${f.connections} strings`],
+            ['TRUTH STATUS', `${f.ledger_valid ? '✓ ledger valid' : '✗ LEDGER BROKEN'} · ${f.ledger_events} events · ${f.journal_entries} journal entries`],
+            ['ARCHIVE', `${f.sessions} sessions on record · app v${f.version}`],
+        ];
+        grid.innerHTML = '';
+        for (const [k, v] of rows) {
+            const row = document.createElement('div');
+            row.className = 'foyer-row';
+            row.innerHTML = `<span class="foyer-k">${k}</span><span class="foyer-v">${escapeText(v)}</span>`;
+            grid.appendChild(row);
+        }
+    } catch (err) {
+        grid.innerHTML = `<div class="foyer-row"><span class="foyer-v">board offline: ${escapeText(err.message)}</span></div>`;
+    }
+}
+
+setInterval(() => {
+    if (!document.getElementById('area-foyer').classList.contains('hidden')) {
+        const ctx = deviceContext();
+        document.getElementById('foyer-clock').textContent = `${ctx.local_date} · ${ctx.local_time}`;
+    }
+}, 30000);
+
+// --- The Wall
+const wallCanvas = document.getElementById('wall-canvas');
+const wallStrings = document.getElementById('wall-strings');
+const wallList = document.getElementById('wall-list');
+const NOTE_ICONS = { idea: '💡', question: '❓', challenge: '⚔️', reference: '📚',
+                     experiment: '🧪', continuity: '📔', quote: '❝', warning: '⚠️' };
+let wallData = { notes: [], connections: [] };
+let connectFrom = null;   // note id when in connect mode
+
+async function renderWall() {
+    try {
+        const res = await fetch('/api/wall');
+        wallData = await res.json();
+    } catch (err) { return; }
+    wallCanvas.querySelectorAll('.wall-note, .wall-grave').forEach((n) => n.remove());
+    for (const n of wallData.notes) {
+        wallCanvas.appendChild(n.tombstone ? graveEl(n) : noteEl(n));
+    }
+    drawStrings();
+    renderWallList();
+}
+
+function noteEl(n) {
+    const el = document.createElement('div');
+    el.className = `wall-note note-${n.color}${n.status !== 'open' ? ' note-dim' : ''}`;
+    el.style.left = `${n.x}%`;
+    el.style.top = `${n.y}%`;
+    el.dataset.id = n.id;
+    el.innerHTML = `<div class="note-head">${NOTE_ICONS[n.note_type] || '📝'} ${escapeText(n.author)}</div>`
+        + `<div class="note-text">${escapeText(n.text)}</div>`
+        + `<div class="note-meta">${(n.ts || '').slice(0, 10)}${n.replies.length ? ` · 💬 ${n.replies.length}` : ''}${n.status !== 'open' ? ` · ${n.status}` : ''}</div>`;
+    enableDrag(el, n);
+    el.addEventListener('click', (e) => {
+        if (el.dataset.dragged === '1') { el.dataset.dragged = ''; return; }
+        if (connectFrom && connectFrom !== n.id) { finishConnect(n.id); return; }
+        openNote(n);
+    });
+    return el;
+}
+
+function graveEl(n) {
+    const el = document.createElement('div');
+    el.className = 'wall-note wall-grave';
+    el.style.left = `${n.x}%`;
+    el.style.top = `${n.y}%`;
+    el.innerHTML = `<div class="note-text">⚰ removed ${(n.removed_at || '').slice(0, 10)}</div>`
+        + `<div class="note-meta">was ${escapeText(n.original_by || '?')} · by ${escapeText(n.authority || '?')}</div>`;
+    return el;
+}
+
+function enableDrag(el, n) {
+    let startX, startY, origL, origT, moved = false;
+    el.addEventListener('pointerdown', (e) => {
+        startX = e.clientX; startY = e.clientY;
+        origL = el.offsetLeft; origT = el.offsetTop;
+        moved = false;
+        el.setPointerCapture(e.pointerId);
+        const onMove = (ev) => {
+            const dx = ev.clientX - startX, dy = ev.clientY - startY;
+            if (Math.abs(dx) + Math.abs(dy) > 6) moved = true;
+            if (!moved) return;
+            el.style.left = `${origL + dx}px`;
+            el.style.top = `${origT + dy}px`;
+            drawStrings();
+        };
+        const onUp = async () => {
+            el.removeEventListener('pointermove', onMove);
+            el.removeEventListener('pointerup', onUp);
+            if (!moved) return;
+            el.dataset.dragged = '1';
+            const rect = wallCanvas.getBoundingClientRect();
+            const x = Math.max(0, Math.min(92, (el.offsetLeft / rect.width) * 100));
+            const y = Math.max(0, Math.min(90, (el.offsetTop / rect.height) * 100));
+            el.style.left = `${x}%`;
+            el.style.top = `${y}%`;
+            n.x = x; n.y = y;
+            drawStrings();
+            await fetch(`/api/wall/notes/${encodeURIComponent(n.id)}/move`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ x, y }),
+            }).catch(() => {});
+        };
+        el.addEventListener('pointermove', onMove);
+        el.addEventListener('pointerup', onUp);
+    });
+}
+
+function drawStrings() {
+    const rect = wallCanvas.getBoundingClientRect();
+    wallStrings.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+    wallStrings.innerHTML = '';
+    for (const c of wallData.connections) {
+        const a = wallCanvas.querySelector(`.wall-note[data-id="${c.from}"]`);
+        const b = wallCanvas.querySelector(`.wall-note[data-id="${c.to}"]`);
+        if (!a || !b) continue;
+        const x1 = a.offsetLeft + a.offsetWidth / 2, y1 = a.offsetTop + a.offsetHeight / 2;
+        const x2 = b.offsetLeft + b.offsetWidth / 2, y2 = b.offsetTop + b.offsetHeight / 2;
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+        line.setAttribute('class', `string string-${c.type === 'contradicts' || c.type === 'disputes' ? 'hot' : 'norm'}`);
+        wallStrings.appendChild(line);
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', (x1 + x2) / 2);
+        label.setAttribute('y', (y1 + y2) / 2 - 4);
+        label.setAttribute('class', 'string-label');
+        label.textContent = c.type.replace(/_/g, ' ');
+        wallStrings.appendChild(label);
+    }
+}
+
+function openNote(n) {
+    const old = document.querySelector('.note-pop');
+    if (old) old.remove();
+    const pop = document.createElement('div');
+    pop.className = 'note-pop';
+    const conns = wallData.connections.filter((c) => c.from === n.id || c.to === n.id);
+    pop.innerHTML = `<div class="note-pop-head">${NOTE_ICONS[n.note_type] || '📝'} <strong>${escapeText(n.author)}</strong> · ${(n.ts || '').slice(0, 16).replace('T', ' ')} · ${n.note_type}</div>`
+        + `<div class="note-pop-text">${escapeText(n.text)}</div>`
+        + (n.session ? `<div class="memory-meta">provenance: session ${escapeText(n.session)}${n.source ? ` · ${escapeText(n.source)}` : ''}</div>` : '')
+        + n.replies.map((r) => `<div class="note-reply"><strong>${escapeText(r.author)}</strong>: ${escapeText(r.text)}</div>`).join('')
+        + conns.map((c) => `<div class="memory-meta">🔗 ${c.type.replace(/_/g, ' ')} ${c.from === n.id ? '→' : '←'} [${c.from === n.id ? c.to : c.from}] (${escapeText(c.author)})${c.explanation ? ` — ${escapeText(c.explanation)}` : ''}</div>`).join('');
+    const replyWrap = document.createElement('div');
+    replyWrap.className = 'nb-add';
+    const input = document.createElement('input');
+    input.type = 'text'; input.maxLength = 400; input.placeholder = 'Reply…';
+    const btn = document.createElement('button');
+    btn.textContent = 'Reply';
+    btn.addEventListener('click', async () => {
+        if (!input.value.trim()) return;
+        await fetch(`/api/wall/notes/${encodeURIComponent(n.id)}/reply`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: input.value.trim() }),
+        });
+        pop.remove(); renderWall();
+    });
+    replyWrap.appendChild(input); replyWrap.appendChild(btn);
+    pop.appendChild(replyWrap);
+    const actions = document.createElement('div');
+    actions.className = 'clip-actions';
+    const mk = (label, fn) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.addEventListener('click', fn);
+        actions.appendChild(b);
+    };
+    mk('🔗 Connect', () => { connectFrom = n.id; pop.remove(); });
+    if (n.status === 'open') mk('✓ Resolve', async () => {
+        await fetch(`/api/wall/notes/${encodeURIComponent(n.id)}/status`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'resolved' }) });
+        pop.remove(); renderWall();
+    });
+    mk('⚰ Remove', async () => {
+        if (!confirm('Remove this note? It leaves a tombstone — history stays.')) return;
+        await fetch(`/api/wall/notes/${encodeURIComponent(n.id)}`, { method: 'DELETE' });
+        pop.remove(); renderWall();
+    });
+    mk('Close', () => pop.remove());
+    pop.appendChild(actions);
+    wallCanvas.appendChild(pop);
+}
+
+async function finishConnect(toId) {
+    const type = prompt('Connection type:\nsupports · contradicts · answers · depends_on · evolved_into · inspired · related · evidence_for · evidence_against', 'related');
+    if (!type) { connectFrom = null; return; }
+    await fetch('/api/wall/connections', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_id: connectFrom, to_id: toId, connection_type: type.trim() }),
+    });
+    connectFrom = null;
+    renderWall();
+}
+
+function renderWallList() {
+    wallList.innerHTML = '';
+    for (const n of [...wallData.notes].reverse()) {
+        if (n.tombstone) {
+            const g = document.createElement('div');
+            g.className = 'memory-item tombstone';
+            g.innerHTML = `<div class="memory-text">⚰ Removed ${(n.removed_at || '').slice(0, 10)} — ${escapeText(n.reason || '')}</div>`;
+            wallList.appendChild(g);
+            continue;
+        }
+        const row = document.createElement('div');
+        row.className = 'memory-item';
+        row.innerHTML = `<div class="memory-text">${NOTE_ICONS[n.note_type] || '📝'} ${escapeText(n.text)}</div>`
+            + `<div class="memory-meta">${escapeText(n.author)} · ${(n.ts || '').slice(0, 10)} · ${n.status}${n.replies.length ? ` · 💬 ${n.replies.length}` : ''}</div>`;
+        row.addEventListener('click', () => openNote(n));
+        wallList.appendChild(row);
+    }
+}
+
+document.getElementById('wall-note-add').addEventListener('click', async () => {
+    const input = document.getElementById('wall-note-input');
+    const text = input.value.trim();
+    if (!text) return;
+    await fetch('/api/wall/notes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, note_type: document.getElementById('wall-note-type').value }),
+    });
+    input.value = '';
+    renderWall();
+});
+document.getElementById('wall-note-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('wall-note-add').click();
+});
+document.getElementById('wall-view-toggle').addEventListener('click', () => {
+    wallList.classList.toggle('hidden');
+    wallCanvas.classList.toggle('hidden');
+});
+
+// --- Desks
+async function renderDeskChips() {
+    const chips = document.getElementById('desk-chips');
+    chips.innerHTML = '';
+    const roster = [...participantsCache.map((p) => ({ id: p.id, name: p.name, color: p.color })),
+                    { id: 'splendor', name: 'Splendor', color: '#e8d9b0' },
+                    { id: 'director', name: 'Director', color: '#8a93a5' }];
+    for (const p of roster) {
+        const chip = document.createElement('button');
+        chip.className = 'chip';
+        chip.innerHTML = `<span class="dot" style="background:${p.color || '#93a0b8'}"></span> ${escapeText(p.name)}`;
+        chip.addEventListener('click', () => renderDesk(p.id));
+        chips.appendChild(chip);
+    }
+}
+
+async function renderDesk(pid) {
+    const view = document.getElementById('desk-view');
+    view.innerHTML = '<p class="field-note">Opening desk…</p>';
+    try {
+        const res = await fetch(`/api/desks/${encodeURIComponent(pid)}`);
+        const d = await res.json();
+        view.innerHTML = '';
+        const h = document.createElement('h3');
+        h.textContent = `🪑 ${d.name}'s desk`;
+        view.appendChild(h);
+
+        const j = document.createElement('p');
+        j.className = 'field-note';
+        j.textContent = d.journal.entries
+            ? `📔 Private journal: ${d.journal.entries} entries · ${d.journal.valid ? '✓ chain valid' : '✗ CHAIN BROKEN'} · last ${(d.journal.last_entry_at || '').slice(0, 10)} (words stay private; verify in 🧾 Truth)`
+            : '📔 Private journal: empty';
+        view.appendChild(j);
+
+        const about = document.createElement('div');
+        about.innerHTML = '<h4 class="nb-heading">🪪 About Me (self-authored, append-only)</h4>';
+        if (!d.about_me.length) {
+            about.innerHTML += '<p class="field-note">Nothing yet — only they can write it, with an ABOUT ME: line.</p>';
+        }
+        for (const a of d.about_me) {
+            about.innerHTML += `<div class="memory-item"><div class="memory-text">• ${escapeText(a.text)}</div><div class="memory-meta">v${a.version} · ${(a.ts || '').slice(0, 10)}</div></div>`;
+        }
+        view.appendChild(about);
+
+        const sect = (title, items, render) => {
+            const s = document.createElement('div');
+            s.innerHTML = `<h4 class="nb-heading">${title}</h4>`;
+            if (!items.length) s.innerHTML += '<p class="field-note">none</p>';
+            for (const it of items) s.innerHTML += render(it);
+            view.appendChild(s);
+        };
+        sect('🧷 Their wall notes', d.notes, (n) =>
+            `<div class="memory-item"><div class="memory-text">${escapeText(n.text)}</div><div class="memory-meta">${(n.ts || '').slice(0, 10)} · ${n.status}</div></div>`);
+        sect('❓ Their questions for Chris', d.questions, (q) =>
+            `<div class="memory-item"><div class="memory-text">${escapeText(q.question)}</div><div class="memory-meta">${q.status}${q.answer ? ` · answered` : ''}</div></div>`);
+        sect('📬 Mail on their desk', d.mail, (m) =>
+            `<div class="memory-item"><div class="memory-text">${escapeText(m.message)}</div><div class="memory-meta">from ${escapeText(m.sender)} · ${(m.ts || '').slice(0, 10)} · ${m.delivered_at ? 'delivered' : 'waiting'}</div></div>`);
+    } catch (err) {
+        view.innerHTML = `<p class="field-note">Could not open desk: ${escapeText(err.message)}</p>`;
+    }
+}
+
+showArea(localStorage.getItem('teamtalk-area') || 'living');
 
 // --- Stale-server detection ------------------------------------------------
 // Static files come fresh from disk; the API's version is loaded at process

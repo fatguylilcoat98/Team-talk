@@ -26,6 +26,7 @@ ALLOWED_FIELDS = {
     "host",
     "port",
     "participants",
+    "location",   # room location, city/region level, set by Chris
 }
 
 # One color per AI, assigned in roster order (Chris is gold, reserved)

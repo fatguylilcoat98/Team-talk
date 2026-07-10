@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import about_store
 import api_client
 import brain
 import director
@@ -32,12 +33,15 @@ import episode_store
 import file_store
 import journal_store
 import ledger
+import mailbox_store
 import memory_store
 import notebook_store
 import questions_store
+import room_actions
 import session_manager
 import settings_store
 import splendor
+import wall_store
 from conversation import (SHORT_TERM_ROUNDS, blind_labels, build_context,
                           normalize_modes, role_notes, system_prompt)
 
@@ -63,6 +67,19 @@ async def version():
     return {"version": APP_VERSION}
 
 
+class RoomContext(BaseModel):
+    """Canonical room time/place from Chris's device — city-level only."""
+    local_date: Optional[str] = None
+    local_time: Optional[str] = None
+    tz: Optional[str] = None
+    location: Optional[str] = None
+    location_source: Optional[str] = None
+
+    def clean(self) -> dict:
+        return {k: (str(v)[:80] if v else None)
+                for k, v in self.dict().items()}
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -72,6 +89,7 @@ class ChatRequest(BaseModel):
     attachments: Optional[List[str]] = None  # upload ids from /api/upload
     awards: Optional[bool] = True            # live commentary & awards layer
     via_splendor: Optional[bool] = False     # Splendor delivers Chris's message
+    room_context: Optional[RoomContext] = None  # device-verified time & place
 
 
 class ParticipantUpdate(BaseModel):
@@ -90,6 +108,7 @@ class SettingsUpdate(BaseModel):
     openai_api_key: Optional[str] = None
     host: Optional[str] = None
     port: Optional[int] = None
+    location: Optional[str] = None
     participants: Optional[List[ParticipantUpdate]] = None
 
 
@@ -168,11 +187,22 @@ async def chat(request: ChatRequest):
 
     for block in (episode_store.episodes_block(cross_episodes),
                   notebook_store.context_block(),
+                  wall_store.context_block(),
                   questions_store.context_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
             memory_block = f"{memory_block}\n\n{block}" if memory_block else block
     episodes_block = episode_store.session_block(session["id"])
+
+    # Canonical room context: one device-verified time & place for everyone.
+    # A change of place (vs the previous round) is itself a ledgered event.
+    rc = request.room_context.clean() if request.room_context else None
+    if rc and rc.get("location") and history:
+        prev_rc = next((r.get("room_context") for r in reversed(history)
+                        if r.get("room_context", {}).get("location")), None)
+        if prev_rc and rc["location"] != prev_rc["location"]:
+            ledger.append("Chris", "room_context_changed",
+                          detail={"from": prev_rc["location"], "to": rc["location"]})
 
     participants = settings_store.get_participants()
 
@@ -188,28 +218,36 @@ async def chat(request: ChatRequest):
     def prompt_for(p, so_far=None):
         me = display[p["id"]]
         others = [display[q["id"]] for q in participants if q["id"] != p["id"]]
-        # The boot packet: this participant's PRIVATE journal + chain status.
-        # Authenticated records, never fake continuity — and never shown to
-        # anyone else in the room.
+        # The boot packet: this participant's PRIVATE journal + chain status
+        # + unread mailbox. Authenticated records, never fake continuity —
+        # and never shown to anyone else in the room.
         private = journal_store.boot_block(p["id"], p["name"])
-        mem = f"{private}\n\n{memory_block}" if private else memory_block
+        mailbox = mailbox_store.boot_block(p["id"])
+        mem = memory_block
+        for blk in (mailbox, private):
+            if blk:
+                mem = f"{blk}\n\n{mem}" if mem else blk
         return (
             system_prompt(me, others, modes,
                           persona=None if blind else p.get("persona"),
                           role_note=notes.get(p["id"]), awards=awards),
             build_context(history, message, me, others, modes, so_far,
                           memory_block=mem, attachments_block=attachments_block,
-                          episodes_block=episodes_block, via_splendor=via_splendor),
+                          episodes_block=episodes_block, via_splendor=via_splendor,
+                          room_context=rc),
         )
 
     def _strip_markers(text: str) -> str:
-        """Remove MEMORY/NOTEBOOK/PIN/JOURNAL/QUESTION lines without storing.
+        """Remove every marker line without storing anything.
         Used for what LATER speakers see mid-round — a JOURNAL: line is
         private and must never ride along in someone else's context."""
         text, _ = memory_store.extract_memories(text)
         text, _, _ = notebook_store.extract(text)
         text, _ = journal_store.extract(text)
         text, _ = questions_store.extract(text)
+        text, _ = mailbox_store.extract(text, participants)
+        text, _ = about_store.extract(text)
+        text = room_actions._ACTION_LINE.sub("", text).strip()
         return text
 
     responses = []
@@ -287,6 +325,30 @@ async def chat(request: ChatRequest):
                 ledger.append(author, "question_asked", ref=q["id"],
                               detail={"question": qt[:200]})
             r["questions_asked"] = len(asked)
+        cleaned, outgoing = mailbox_store.extract(r["text"], participants)
+        if outgoing or cleaned != r["text"]:
+            r["text"] = cleaned
+            for m in outgoing:
+                item = mailbox_store.send(author, m["recipient_id"],
+                                          m["recipient_name"], m["message"], session["id"])
+                ledger.append(author, "mailbox_sent", ref=item["id"],
+                              detail={"to": m["recipient_name"], "chars": len(m["message"])})
+            if outgoing:
+                r["mail_sent"] = len(outgoing)
+        cleaned, abouts = about_store.extract(r["text"])
+        if abouts:
+            r["text"] = cleaned
+            for line in abouts:
+                entry = about_store.append(r["id"], line)
+                ledger.append(author, "about_me_written", ref=f"{r['id']}/v{entry['version']}",
+                              detail={"text": line[:200]})
+            r["about_written"] = len(abouts)
+        cleaned, action_results = room_actions.extract_and_apply(
+            r["text"], author, session["id"])
+        if action_results or cleaned != r["text"]:
+            r["text"] = cleaned
+            if action_results:
+                r["room_actions"] = action_results
 
     ok_count = sum(1 for r in responses if not r["text"].startswith("Error:"))
     if ok_count == len(responses):
@@ -304,6 +366,7 @@ async def chat(request: ChatRequest):
         "modes": modes,
         "turn_style": turn_style,
         **({"via_splendor": True, "chris_raw": chris_raw} if via_splendor else {}),
+        **({"room_context": rc} if rc else {}),
         "awards": awards,
         "attachments": [
             {"id": m["id"], "name": m["name"], "kind": m["kind"]} for m in att_metas
@@ -383,6 +446,7 @@ def _settings_snapshot() -> dict:
         "participants": _public_participants(),
         "host": settings_store.resolve("host", "HOST", "127.0.0.1"),
         "port": int(settings_store.resolve("port", "PORT", "5000")),
+        "location": settings_store.resolve("location", "ROOM_LOCATION", "") or "",
         "warning": LAN_WARNING,
     }
 
@@ -399,6 +463,8 @@ async def save_settings(update: SettingsUpdate):
         value = getattr(update, field)
         if value not in (None, ""):
             updates[field] = value
+    if update.location is not None:   # empty string clears the location
+        updates["location"] = update.location.strip()[:80]
     if update.port is not None:
         if not 1 <= update.port <= 65535:
             raise HTTPException(status_code=400, detail="Port must be between 1 and 65535")
@@ -491,6 +557,147 @@ async def clear_memory():
     removed = memory_store.clear()
     ledger.append("Chris", "memory_cleared", detail={"tombstoned": removed})
     return {"status": "cleared", "removed": removed}
+
+
+# --- The Room: foyer, wall, desks ---------------------------------------------
+
+@app.get("/api/foyer")
+async def foyer():
+    """Everything the Foyer Board shows — server side. The client merges in
+    its own device clock/location (the canonical source)."""
+    wall = wall_store.get_wall()
+    live_notes = [n for n in wall["notes"] if not n.get("tombstone")]
+    chain = ledger.verify_chain()
+    journal_entries = sum(len(journal_store.read(pid))
+                          for pid in journal_store.list_journals())
+    return {
+        "open_questions": questions_store.open_count(),
+        "unread_mail": mailbox_store.unread_count(),
+        "wall_notes_open": sum(1 for n in live_notes if n.get("status") == "open"),
+        "wall_notes_total": len(live_notes),
+        "connections": len(wall["connections"]),
+        "ledger_valid": chain["valid"],
+        "ledger_events": chain["length"],
+        "journal_entries": journal_entries,
+        "sessions": len(await session_manager.list_sessions()),
+        "version": APP_VERSION,
+        "location_setting": settings_store.resolve("location", "ROOM_LOCATION", "") or "",
+    }
+
+
+class NoteCreate(BaseModel):
+    text: str
+    note_type: Optional[str] = "idea"
+
+
+class NoteMove(BaseModel):
+    x: float
+    y: float
+
+
+class NoteReply(BaseModel):
+    text: str
+
+
+class NoteStatus(BaseModel):
+    status: str
+
+
+class ConnectionCreate(BaseModel):
+    from_id: str
+    to_id: str
+    connection_type: str
+    explanation: Optional[str] = ""
+
+
+@app.get("/api/wall")
+async def get_wall():
+    return wall_store.get_wall()
+
+
+@app.post("/api/wall/notes")
+async def create_wall_note(body: NoteCreate):
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Note is empty")
+    note = wall_store.create_note("Chris", text, note_type=body.note_type or "idea",
+                                  source="wall_ui")
+    ledger.append("Chris", "notebook_written", ref=f"wall/{note['id']}",
+                  detail={"note_type": note["note_type"], "text": text[:200]})
+    return note
+
+
+@app.post("/api/wall/notes/{note_id}/move")
+async def move_wall_note(note_id: str, body: NoteMove):
+    if not wall_store.move(note_id, body.x, body.y):
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"status": "moved"}
+
+
+@app.post("/api/wall/notes/{note_id}/reply")
+async def reply_wall_note(note_id: str, body: NoteReply):
+    r = wall_store.reply(note_id, "Chris", body.text)
+    if not r:
+        raise HTTPException(status_code=404, detail="Note not found or reply empty")
+    ledger.append("Chris", "notebook_written", ref=f"wall/{note_id}/reply",
+                  detail={"text": body.text[:200]})
+    return r
+
+
+@app.post("/api/wall/notes/{note_id}/status")
+async def set_wall_note_status(note_id: str, body: NoteStatus):
+    if not wall_store.set_status(note_id, body.status):
+        raise HTTPException(status_code=400, detail="Bad note id or status")
+    return {"status": body.status}
+
+
+@app.delete("/api/wall/notes/{note_id}")
+async def remove_wall_note(note_id: str):
+    if not wall_store.tombstone(note_id):
+        raise HTTPException(status_code=404, detail="Note not found")
+    ledger.append("Chris", "tombstone_placed", ref=f"wall/{note_id}",
+                  detail={"store": "wall", "action": "notebook_removed"})
+    return {"status": "removed", "tombstone": True}
+
+
+@app.post("/api/wall/connections")
+async def create_wall_connection(body: ConnectionCreate):
+    conn = wall_store.connect("Chris", body.from_id, body.to_id,
+                              body.connection_type, explanation=body.explanation or "")
+    if not conn:
+        raise HTTPException(status_code=400, detail="Bad note ids or connection type")
+    ledger.append("Chris", "connection_created", ref=conn["id"],
+                  detail={"type": conn["type"], "from": conn["from"], "to": conn["to"]})
+    return conn
+
+
+@app.get("/api/desks/{participant_id}")
+async def get_desk(participant_id: str):
+    """A participant's desk: real history, nothing invented. Journal words
+    stay private to the owner in-room; Chris reads via /api/verify."""
+    chain = journal_store.verify(participant_id)
+    entries = journal_store.read(participant_id)
+    wall = wall_store.get_wall()
+    roster = {p["id"]: p["name"] for p in settings_store.get_participants()}
+    roster.update({"splendor": "Splendor", "director": "Director"})
+    name = roster.get(participant_id, participant_id)
+    my_notes = [n for n in wall["notes"]
+                if not n.get("tombstone") and n.get("author") == name][-10:]
+    my_questions = [q for q in questions_store.list_questions()
+                    if q.get("asker") == name][-10:]
+    my_mail = [m for m in mailbox_store.list_mail()
+               if m.get("recipient_id") == participant_id][-10:]
+    return {
+        "participant": participant_id,
+        "name": name,
+        "about_me": about_store.read(participant_id),
+        "journal": {"entries": len(entries), "valid": chain["valid"],
+                    "last_entry_at": entries[-1]["ts"] if entries else None,
+                    "latest_hash": entries[-1]["hash"] if entries else None},
+        "notes": my_notes,
+        "questions": my_questions,
+        "mail": my_mail,
+    }
 
 
 # --- The Truth Layer: verify, ledger, questions -------------------------------
