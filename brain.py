@@ -244,6 +244,7 @@ async def ranked_memory_block(query_vec: Optional[List[float]], memories: List[d
     Falls back to the most recent MEMORY_TOP_K when embeddings are
     unavailable — exactly the app's pre-brain behavior.
     """
+    memories = [m for m in memories if not m.get("tombstone")]
     if not memories:
         return ""
     pool = memories[-200:]  # rank at most the latest 200

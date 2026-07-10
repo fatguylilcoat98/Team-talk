@@ -1041,3 +1041,78 @@ button.danger:hover {
     color: var(--text-dim);
     font-size: 0.8rem;
 }
+
+/* --- 🧾 The Truth Layer --- */
+.truth-modal {
+    max-width: 680px;
+}
+
+.question-item,
+.verify-item {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.question-item.answered {
+    opacity: 0.8;
+}
+
+.q-answer {
+    color: var(--chris);
+}
+
+.v-ok { color: var(--chatgpt); }
+.v-bad { color: var(--danger); font-weight: 700; }
+
+.hash-line {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    word-break: break-all;
+}
+
+.bundle-link {
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    text-decoration: none;
+}
+
+.bundle-link:hover {
+    background: var(--border);
+}
+
+.ledger-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 34vh;
+    overflow-y: auto;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.ledger-line {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.74rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.memory-item.tombstone {
+    opacity: 0.6;
+    border-style: dashed;
+    grid-template-columns: 1fr;
+}

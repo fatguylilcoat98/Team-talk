@@ -148,6 +148,10 @@ Every AI has an optional **Personality** box on its card in Settings. Whatever y
 
 The character shows as a 🎭 badge next to the AI's name in the chat. Combine with ⚔️ Debate mode and a dumb question for maximum entertainment. Clear the box to get the normal AI back.
 
+## 🧾 The Truth Layer
+
+The room designed this itself in a Founder Council session. Every participant gets a **private, hash-chained journal** (`memory/journals/{id}_private.json`) that only it can write — via `JOURNAL:` lines, with a self-set `recognized=true/false/uncertain` flag that is never inferred. Boot packets show each AI its own chain status and records with honest framing ("authenticated records", never fake memory). Every operation — memory, notebook, pins, journals, questions, verifications, exports — lands in an **append-only hash-chained ledger** (`memory/ledger.jsonl`); one modified byte invalidates everything after it. Deletions leave **tombstones** (date, reason, authority) — content may disappear, history never does. AIs can queue **Questions for Chris** (`QUESTION FOR CHRIS:` lines) that wait, unexpiring, until answered in the app. The **🧾 Truth** panel shows raw data with no narrator: open questions, per-participant chain verification with exportable bundles (`GET /api/verify/{id}`), and the glass-box event log. All verification code is in this public repo — check the math yourself.
+
 ## 🎬 Director's Cut
 
 A silent Director occupies the sixth chair — visually present, never speaking. When a session's worth watching, hit **🎬 Director's Cut → Wrap**: the Director reviews the footage with Splendor and cuts the best moments into 30-second vertical shorts. Each clip card gives you a title, the key quote, the Director's evidence, Splendor's interpretation, a story-style 9:16 preview you can screen-record, an exportable JSON script (the input for real video rendering later), and a copy-ready caption with hashtags. Cuts persist in `directors_cut/` on your server (gitignored).

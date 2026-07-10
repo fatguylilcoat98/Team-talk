@@ -575,6 +575,8 @@ function aiBubble(resp, allNames = [], reveal = false) {
         }
         if (resp.notebook_saved) extra += '  ·  📓 wrote in the notebook';
         if (resp.pins_saved) extra += '  ·  📌 pinned a quote';
+        if (resp.journal_saved) extra += '  ·  📔 wrote in their journal';
+        if (resp.questions_asked) extra += '  ·  ❓ asked Chris a question';
         t.textContent = `tokens: ${resp.tokens}${extra}`;
         el.appendChild(t);
     }
@@ -948,6 +950,14 @@ async function renderMemories() {
             return;
         }
         for (const m of [...data.memories].reverse()) {
+            if (m.tombstone) {
+                const grave = document.createElement('div');
+                grave.className = 'memory-item tombstone';
+                grave.innerHTML = `<div class="memory-text">⚰ Removed ${(m.removed_at || '').slice(0, 10)} — ${escapeText(m.reason)}</div>`
+                    + `<div class="memory-meta">was by ${escapeText(m.original_by || '?')} · removed by ${escapeText(m.authority || '?')}</div>`;
+                memoryList.appendChild(grave);
+                continue;
+            }
             const row = document.createElement('div');
             row.className = 'memory-item';
             const text = document.createElement('div');
@@ -1019,6 +1029,13 @@ notebookOverlay.addEventListener('click', (e) => {
 });
 
 function notebookRow(item, kind) {
+    if (item.tombstone) {
+        const grave = document.createElement('div');
+        grave.className = 'memory-item tombstone';
+        grave.innerHTML = `<div class="memory-text">⚰ Removed ${(item.removed_at || '').slice(0, 10)} — ${escapeText(item.reason)}</div>`
+            + `<div class="memory-meta">was by ${escapeText(item.original_by || '?')} · removed by ${escapeText(item.authority || '?')}</div>`;
+        return grave;
+    }
     const row = document.createElement('div');
     row.className = 'memory-item';
     const text = document.createElement('div');
@@ -1338,6 +1355,150 @@ clipStage.addEventListener('click', (e) => {
     else clipIndex++;
     showFrame();
 });
+
+// --- 🧾 The Truth Layer -------------------------------------------------------
+
+const truthBtn = document.getElementById('truth-btn');
+const truthOverlay = document.getElementById('truth-overlay');
+const truthClose = document.getElementById('truth-close');
+const questionsList = document.getElementById('questions-list');
+const verifyList = document.getElementById('verify-list');
+const ledgerChain = document.getElementById('ledger-chain');
+const ledgerList = document.getElementById('ledger-list');
+
+truthBtn.addEventListener('click', async () => {
+    truthOverlay.classList.remove('hidden');
+    renderQuestions();
+    renderVerification();
+    renderLedger();
+});
+truthClose.addEventListener('click', () => truthOverlay.classList.add('hidden'));
+truthOverlay.addEventListener('click', (e) => {
+    if (e.target === truthOverlay) truthOverlay.classList.add('hidden');
+});
+
+async function renderQuestions() {
+    questionsList.innerHTML = '<p class="field-note">Loading…</p>';
+    try {
+        const res = await fetch('/api/questions');
+        const data = await res.json();
+        questionsList.innerHTML = '';
+        const open = data.questions.filter((q) => q.status === 'open');
+        const answered = data.questions.filter((q) => q.status === 'answered').slice(-5);
+        if (!open.length && !answered.length) {
+            questionsList.innerHTML = '<p class="field-note">No questions yet. Any AI can ask with a "QUESTION FOR CHRIS:" line — it waits here until you answer. No expiration.</p>';
+            return;
+        }
+        for (const q of open) {
+            const row = document.createElement('div');
+            row.className = 'question-item';
+            const head = document.createElement('div');
+            head.className = 'memory-meta';
+            head.textContent = `OPEN · ${q.asker} · ${(q.ts || '').slice(0, 10)}`;
+            const text = document.createElement('div');
+            text.className = 'memory-text';
+            text.textContent = q.question;
+            const answerWrap = document.createElement('div');
+            answerWrap.className = 'nb-add';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.maxLength = 1000;
+            input.placeholder = 'Your answer — goes back to the whole room…';
+            const btn = document.createElement('button');
+            btn.textContent = 'Answer';
+            btn.addEventListener('click', async () => {
+                const answer = input.value.trim();
+                if (!answer) return;
+                await fetch(`/api/questions/${encodeURIComponent(q.id)}/answer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ answer }),
+                });
+                renderQuestions();
+            });
+            input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+            answerWrap.appendChild(input);
+            answerWrap.appendChild(btn);
+            row.appendChild(head);
+            row.appendChild(text);
+            row.appendChild(answerWrap);
+            questionsList.appendChild(row);
+        }
+        for (const q of answered.reverse()) {
+            const row = document.createElement('div');
+            row.className = 'question-item answered';
+            row.innerHTML = `<div class="memory-meta">ANSWERED · ${escapeText(q.asker)} · ${(q.answered_at || '').slice(0, 10)}</div>`
+                + `<div class="memory-text">${escapeText(q.question)}</div>`
+                + `<div class="memory-text q-answer">↳ ${escapeText(q.answer)}</div>`;
+            questionsList.appendChild(row);
+        }
+    } catch (err) {
+        questionsList.innerHTML = `<p class="field-note">Could not load questions: ${err.message}</p>`;
+    }
+}
+
+async function renderVerification() {
+    verifyList.innerHTML = '<p class="field-note">Recomputing chains…</p>';
+    try {
+        const res = await fetch('/api/verify');
+        const data = await res.json();
+        verifyList.innerHTML = '';
+        for (const p of data.participants) {
+            const row = document.createElement('div');
+            row.className = 'verify-item';
+            const status = p.entries === 0
+                ? '· empty'
+                : (p.valid ? '✓ hash chain valid' : `✗ CHAIN BROKEN (${p.reason})`);
+            const head = document.createElement('div');
+            head.className = 'memory-text';
+            head.innerHTML = `<strong>${escapeText(p.participant)}</strong> — ${p.entries} entries <span class="${p.valid ? 'v-ok' : 'v-bad'}">${status}</span>`;
+            row.appendChild(head);
+            if (p.latest_hash) {
+                const hash = document.createElement('div');
+                hash.className = 'hash-line';
+                hash.textContent = `latest ${p.latest_hash}`;
+                row.appendChild(hash);
+            }
+            const actions = document.createElement('div');
+            actions.className = 'clip-actions';
+            const bundle = document.createElement('a');
+            bundle.href = `/api/verify/${encodeURIComponent(p.participant)}/bundle`;
+            bundle.textContent = 'Export Verification Bundle';
+            bundle.className = 'bundle-link';
+            bundle.setAttribute('download', '');
+            actions.appendChild(bundle);
+            row.appendChild(actions);
+            verifyList.appendChild(row);
+        }
+    } catch (err) {
+        verifyList.innerHTML = `<p class="field-note">Could not verify: ${err.message}</p>`;
+    }
+}
+
+async function renderLedger() {
+    ledgerChain.textContent = 'Verifying ledger chain…';
+    ledgerList.innerHTML = '';
+    try {
+        const res = await fetch('/api/ledger?limit=40');
+        const data = await res.json();
+        ledgerChain.textContent = data.chain.valid
+            ? `✓ ledger chain valid · ${data.chain.length} events, append-only`
+            : `✗ LEDGER CHAIN BROKEN at event ${data.chain.first_bad_seq} (${data.chain.reason})`;
+        ledgerChain.className = `field-note ${data.chain.valid ? 'v-ok' : 'v-bad'}`;
+        for (const e of [...data.events].reverse()) {
+            const line = document.createElement('div');
+            line.className = 'ledger-line';
+            line.textContent = `#${e.seq} ${(e.ts || '').slice(0, 16)}Z ${e.actor} → ${e.action}${e.ref ? ` [${e.ref}]` : ''}`;
+            line.title = `hash ${e.hash}`;
+            ledgerList.appendChild(line);
+        }
+        if (!data.events.length) {
+            ledgerList.innerHTML = '<p class="field-note">No events yet — the ledger starts recording from this version on.</p>';
+        }
+    } catch (err) {
+        ledgerChain.textContent = `Could not load ledger: ${err.message}`;
+    }
+}
 
 // --- Stale-server detection ------------------------------------------------
 // Static files come fresh from disk; the API's version is loaded at process

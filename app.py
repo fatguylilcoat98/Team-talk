@@ -8,6 +8,7 @@ and ai_only (the AIs talk to each other while Chris watches).
 """
 
 import asyncio
+import json
 import os
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -29,8 +30,11 @@ import brain
 import director
 import episode_store
 import file_store
+import journal_store
+import ledger
 import memory_store
 import notebook_store
+import questions_store
 import session_manager
 import settings_store
 import splendor
@@ -164,6 +168,7 @@ async def chat(request: ChatRequest):
 
     for block in (episode_store.episodes_block(cross_episodes),
                   notebook_store.context_block(),
+                  questions_store.context_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
             memory_block = f"{memory_block}\n\n{block}" if memory_block else block
@@ -183,14 +188,29 @@ async def chat(request: ChatRequest):
     def prompt_for(p, so_far=None):
         me = display[p["id"]]
         others = [display[q["id"]] for q in participants if q["id"] != p["id"]]
+        # The boot packet: this participant's PRIVATE journal + chain status.
+        # Authenticated records, never fake continuity — and never shown to
+        # anyone else in the room.
+        private = journal_store.boot_block(p["id"], p["name"])
+        mem = f"{private}\n\n{memory_block}" if private else memory_block
         return (
             system_prompt(me, others, modes,
                           persona=None if blind else p.get("persona"),
                           role_note=notes.get(p["id"]), awards=awards),
             build_context(history, message, me, others, modes, so_far,
-                          memory_block=memory_block, attachments_block=attachments_block,
+                          memory_block=mem, attachments_block=attachments_block,
                           episodes_block=episodes_block, via_splendor=via_splendor),
         )
+
+    def _strip_markers(text: str) -> str:
+        """Remove MEMORY/NOTEBOOK/PIN/JOURNAL/QUESTION lines without storing.
+        Used for what LATER speakers see mid-round — a JOURNAL: line is
+        private and must never ride along in someone else's context."""
+        text, _ = memory_store.extract_memories(text)
+        text, _, _ = notebook_store.extract(text)
+        text, _ = journal_store.extract(text)
+        text, _ = questions_store.extract(text)
+        return text
 
     responses = []
     if turn_style == "sequential":
@@ -202,7 +222,7 @@ async def chat(request: ChatRequest):
             system, ctx = prompt_for(p, so_far)
             result = await api_client.call_participant(p, system, ctx, images=images)
             if result["ok"]:
-                so_far.append({"name": display[p["id"]], "text": result["text"]})
+                so_far.append({"name": display[p["id"]], "text": _strip_markers(result["text"])})
             responses.append(_response_entry(p, result, labels.get(p["id"])))
     else:
         # The core requirement: every AI is called at the same time
@@ -214,28 +234,59 @@ async def chat(request: ChatRequest):
         responses = [_response_entry(p, r, labels.get(p["id"]))
                      for p, r in zip(participants, results)]
 
-    # Long-term memory, notebook entries, and pinned quotes: strip the
-    # MEMORY:/NOTEBOOK:/PIN: lines and store them on disk. In blind mode
-    # everything is credited to the anonymous voice, not the real name.
+    # Long-term memory, notebook entries, pinned quotes, private journal
+    # entries, and questions for Chris: strip the marker lines, store them
+    # on disk, and record every write in the glass-box ledger. In blind
+    # mode public credits go to the anonymous voice, not the real name —
+    # but a journal always belongs to the real participant (it's private).
     for r in responses:
         author = r.get("label") or r["name"]
         cleaned, memories = memory_store.extract_memories(r["text"])
         if memories:
             r["text"] = cleaned
             for m in memories:
-                memory_store.add(m, author)
+                entry = memory_store.add(m, author)
+                ledger.append(author, "memory_created", ref=entry["id"],
+                              detail={"text": m[:200]})
             r["memories_saved"] = len(memories)
         cleaned, notes_saved, pins_saved = notebook_store.extract(r["text"])
         if notes_saved or pins_saved:
             r["text"] = cleaned
             for n in notes_saved:
-                notebook_store.add_entry(n, author)
+                entry = notebook_store.add_entry(n, author)
+                ledger.append(author, "notebook_written", ref=entry["id"],
+                              detail={"text": n[:200]})
             for q in pins_saved:
-                notebook_store.add_pin(q, author)
+                pin = notebook_store.add_pin(q, author)
+                ledger.append(author, "pin_created", ref=pin["id"],
+                              detail={"quote": q[:200]})
             if notes_saved:
                 r["notebook_saved"] = len(notes_saved)
             if pins_saved:
                 r["pins_saved"] = len(pins_saved)
+        cleaned, journal_entries = journal_store.extract(r["text"])
+        if journal_entries:
+            r["text"] = cleaned
+            for j in journal_entries:
+                entry = journal_store.write(
+                    r["id"], r["name"], session["id"], j["note"],
+                    intent=j["intent"], recognized=j["recognized"],
+                    confidence=j["confidence"])
+                if entry:
+                    # Fact-of-write is public; the words stay in the journal.
+                    ledger.append(author, "journal_written",
+                                  ref=f"{r['id']}/v{entry['version']}",
+                                  detail={"hash": entry["hash"],
+                                          "recognized": entry["recognized"]})
+            r["journal_saved"] = len(journal_entries)
+        cleaned, asked = questions_store.extract(r["text"])
+        if asked:
+            r["text"] = cleaned
+            for qt in asked:
+                q = questions_store.ask(author, qt, session["id"])
+                ledger.append(author, "question_asked", ref=q["id"],
+                              detail={"question": qt[:200]})
+            r["questions_asked"] = len(asked)
 
     ok_count = sum(1 for r in responses if not r["text"].startswith("Error:"))
     if ok_count == len(responses):
@@ -430,13 +481,125 @@ async def add_memory(body: MemoryAdd):
 async def delete_memory(memory_id: str):
     if not memory_store.delete(memory_id):
         raise HTTPException(status_code=404, detail="Memory not found")
-    return {"status": "deleted"}
+    ledger.append("Chris", "tombstone_placed", ref=memory_id,
+                  detail={"store": "memory", "action": "memory_removed"})
+    return {"status": "removed", "tombstone": True}
 
 
 @app.delete("/api/memory")
 async def clear_memory():
     removed = memory_store.clear()
+    ledger.append("Chris", "memory_cleared", detail={"tombstoned": removed})
     return {"status": "cleared", "removed": removed}
+
+
+# --- The Truth Layer: verify, ledger, questions -------------------------------
+
+def _known_participant_ids() -> List[str]:
+    ids = {p["id"] for p in settings_store.get_participants()}
+    ids.update(journal_store.list_journals())
+    ids.update({"splendor", "director"})
+    return sorted(ids)
+
+
+@app.get("/api/verify/{participant_id}")
+async def verify_participant(participant_id: str):
+    """Raw data only: the participant's full journal, chain math, and the
+    verification history. No summaries, no narrator."""
+    entries = journal_store.read(participant_id)
+    chain = journal_store.verify(participant_id)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ledger.append("Chris", "journal_viewed", ref=participant_id,
+                  detail={"entries": len(entries)})
+    ledger.append("Chris", "verify_executed", ref=participant_id,
+                  detail={"valid": chain["valid"], "length": chain["length"]})
+    history = ledger.list_events(action="verify_executed", limit=20)
+    return {
+        "participant": participant_id,
+        "journal": entries,                      # immutable chronological log, raw
+        "chain": chain,                          # recomputed just now
+        "last_verified": now,
+        "journal_version": entries[-1]["version"] if entries else 0,
+        "latest_hash": entries[-1]["hash"] if entries else None,
+        "verification_history": [e for e in history if e.get("ref") == participant_id],
+        "note": "Verification code is open source — recompute every hash yourself from the repo.",
+    }
+
+
+@app.get("/api/verify/{participant_id}/bundle")
+async def verification_bundle(participant_id: str):
+    """Export bundle: everything needed to verify this journal offline."""
+    entries = journal_store.read(participant_id)
+    chain = journal_store.verify(participant_id)
+    events = [e for e in ledger.list_events(limit=1000)
+              if participant_id in (e.get("ref") or "") or e.get("actor") == participant_id]
+    ledger.append("Chris", "bundle_exported", ref=participant_id,
+                  detail={"entries": len(entries), "events": len(events)})
+    bundle = {
+        "participant": participant_id,
+        "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "journal": entries,
+        "chain": chain,
+        "ledger_events": events,
+        "how_to_verify": (
+            "Each entry: hash = sha256(ts|writer|session|intent|continuity_note|"
+            "recognized|confidence|prev_hash); content_hash = sha256(continuity_note); "
+            "first prev_hash is 64 zeros. Code: journal_store.py in the public repo."
+        ),
+    }
+    return Response(
+        content=json.dumps(bundle, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{participant_id}-verification-bundle.json"'},
+    )
+
+
+@app.get("/api/verify")
+async def verify_all():
+    """Chain status for every participant + the glass-box ledger chain."""
+    participants = []
+    for pid in _known_participant_ids():
+        entries = journal_store.read(pid)
+        chain = journal_store.verify(pid)
+        participants.append({
+            "participant": pid,
+            "entries": len(entries),
+            "valid": chain["valid"],
+            "reason": chain["reason"],
+            "latest_hash": entries[-1]["hash"] if entries else None,
+            "last_entry_at": entries[-1]["ts"] if entries else None,
+        })
+    return {"participants": participants, "ledger": ledger.verify_chain()}
+
+
+@app.get("/api/ledger")
+async def get_ledger(actor: Optional[str] = None, action: Optional[str] = None,
+                     limit: int = 100):
+    return {"chain": ledger.verify_chain(),
+            "events": ledger.list_events(actor=actor, action=action, limit=limit)}
+
+
+class AnswerBody(BaseModel):
+    answer: str
+
+
+@app.get("/api/questions")
+async def get_questions():
+    return {"questions": questions_store.list_questions(),
+            "open": questions_store.open_count()}
+
+
+@app.post("/api/questions/{question_id}/answer")
+async def answer_question(question_id: str, body: AnswerBody):
+    text = body.answer.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Answer is empty")
+    q = questions_store.answer(question_id, text)
+    if q is None:
+        raise HTTPException(status_code=404, detail="Open question not found")
+    ledger.append("Chris", "question_answered", ref=question_id,
+                  detail={"answer": text[:200]})
+    return q
 
 
 # --- Voice mode: Splendor speaks the room ------------------------------------
@@ -507,19 +670,24 @@ async def add_notebook_entry(body: NotebookAdd):
 async def delete_notebook_entry(entry_id: str):
     if not notebook_store.delete_entry(entry_id):
         raise HTTPException(status_code=404, detail="Entry not found")
-    return {"status": "deleted"}
+    ledger.append("Chris", "tombstone_placed", ref=entry_id,
+                  detail={"store": "notebook", "action": "notebook_removed"})
+    return {"status": "removed", "tombstone": True}
 
 
 @app.delete("/api/notebook/pins/{pin_id}")
 async def delete_notebook_pin(pin_id: str):
     if not notebook_store.delete_pin(pin_id):
         raise HTTPException(status_code=404, detail="Pin not found")
-    return {"status": "deleted"}
+    ledger.append("Chris", "tombstone_placed", ref=pin_id,
+                  detail={"store": "pins", "action": "notebook_removed"})
+    return {"status": "removed", "tombstone": True}
 
 
 @app.delete("/api/notebook")
 async def clear_notebook():
     removed = notebook_store.clear()
+    ledger.append("Chris", "notebook_cleared", detail={"tombstoned": removed})
     return {"status": "cleared", "removed": removed}
 
 
@@ -534,6 +702,8 @@ async def wrap_directors_cut(session_id: str):
     if not session.get("rounds"):
         raise HTTPException(status_code=400, detail="Nothing to cut — the session has no rounds yet.")
     cut = await director.wrap_session(session)
+    ledger.append("Director", "directors_cut_wrapped", ref=session_id,
+                  detail={"moments": len(cut["moments"]), "clips": len(cut["clips"])})
     if not cut["moments"]:
         raise HTTPException(
             status_code=503,
