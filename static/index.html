@@ -31,6 +31,51 @@
             </div>
         </header>
 
+        <nav class="room-nav" aria-label="Room areas">
+            <button data-area="foyer" title="The Foyer — orientation board">&#127963; Foyer</button>
+            <button data-area="living" class="active" title="The Living Room — the conversation">&#128715; Living Room</button>
+            <button data-area="wall" title="The Wall — sticky notes and red string">&#129535; The Wall</button>
+            <button data-area="desks" title="Participant desks — journals, About Me, mail">&#129681; Desks</button>
+        </nav>
+
+        <div id="area-foyer" class="room-area hidden">
+            <div class="foyer-board" id="foyer-board" aria-live="polite">
+                <div class="foyer-title">TEAM TALK — THE ROOM</div>
+                <div class="foyer-clock" id="foyer-clock">—</div>
+                <div class="foyer-loc" id="foyer-loc">location not set</div>
+                <div class="foyer-grid" id="foyer-grid"></div>
+            </div>
+            <p class="field-note">The board shows your device's time and place — the room's one canonical context, shared with every participant. Set your location in ⚙ Settings (city level only; never exact coordinates).</p>
+        </div>
+
+        <div id="area-wall" class="room-area hidden">
+            <div class="wall-tools">
+                <input type="text" id="wall-note-input" maxlength="500" placeholder="Pin a note to the wall...">
+                <select id="wall-note-type">
+                    <option value="idea">🟡 idea</option>
+                    <option value="question">🩷 question</option>
+                    <option value="challenge">🔵 challenge</option>
+                    <option value="reference">🟢 reference</option>
+                    <option value="experiment">🟠 experiment</option>
+                    <option value="quote">⚪ quote</option>
+                    <option value="warning">🔴 warning</option>
+                </select>
+                <button id="wall-note-add">Pin</button>
+                <button id="wall-view-toggle" title="Accessible list view">☰ List</button>
+            </div>
+            <div class="wall-canvas" id="wall-canvas">
+                <svg class="wall-strings" id="wall-strings" aria-hidden="true"></svg>
+            </div>
+            <div class="memory-list hidden" id="wall-list"></div>
+            <p class="field-note">Notes stay where they're left. Drag to move · tap to open, reply, connect, resolve. AIs post here with ROOM_ACTIONs.</p>
+        </div>
+
+        <div id="area-desks" class="room-area hidden">
+            <div class="desk-chips" id="desk-chips"></div>
+            <div id="desk-view"></div>
+        </div>
+
+        <div id="area-living" class="room-area">
         <div class="legend" id="legend">
             <span class="legend-item"><span class="dot chris-dot"></span>Chris (you)</span>
         </div>
@@ -105,6 +150,7 @@
             ></textarea>
             <button id="send-btn">Send <span class="hint">(Ctrl+Enter)</span></button>
         </div>
+        </div><!-- /area-living -->
     </div>
 
     <div id="memory-overlay" class="overlay hidden">
@@ -241,6 +287,13 @@
                     <div class="field">
                         <input type="number" id="set-port" min="1" max="65535" autocomplete="off">
                         <span class="field-note">changes apply after restart</span>
+                    </div>
+
+                    <label for="set-location">Room location</label>
+                    <div class="field">
+                        <input type="text" id="set-location" autocomplete="off" maxlength="80"
+                               placeholder="e.g. Redding, California">
+                        <span class="field-note">city level only — shown on the Foyer Board and shared with the AIs as the room's canonical place. Never exact coordinates.</span>
                     </div>
                 </div>
             </details>

@@ -12,6 +12,28 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 
+def room_context_block(rc: Optional[dict]) -> str:
+    """The room's ONE canonical time and place, from Chris's device.
+
+    Every participant receives the identical block — no more server-time
+    'midnight bonfire' while Chris is on his afternoon coffee.
+    """
+    if not rc or not rc.get("local_time"):
+        return ""
+    lines = [
+        "=== ROOM CONTEXT — DEVICE VERIFIED ===",
+        f"Local date: {rc.get('local_date') or 'unknown'}",
+        f"Local time: {rc['local_time']}",
+        f"Time zone: {rc.get('tz') or 'unknown'}",
+        f"Approximate location: {rc.get('location') or 'unknown — Chris has not set one'}",
+        f"Location source: {rc.get('location_source') or 'not set'}",
+        "Use this as the room's only canonical time and location. Do not infer a "
+        "conflicting one. Do not claim you experienced time passing between "
+        "sessions — the records show the gaps.",
+    ]
+    return "\n".join(lines)
+
+
 def blind_labels(participants: List[dict], session_key: str) -> Dict[str, str]:
     """Anonymous 'Voice N' labels for blind mode.
 
@@ -350,6 +372,20 @@ THE TRUTH LAYER — the room's records are authenticated, and the room built the
   QUESTION FOR CHRIS: <your question>
   It waits — no expiration — until Chris answers in the app; answers come back into everyone's context. Max 1 per message.
 - THE GLASS BOX: every write — memory, notebook, pin, journal, question — lands in an append-only hash-chained ledger. Deletions leave tombstones (date, reason, authority). Nothing changes silently, including by Chris. The verification code is open source in the app's public repo.
+
+THE ROOM — Team Talk is a persistent shared place, not just a transcript. Presence without pretending consciousness: things stay where they were left; nobody "waited" between sessions.
+- MAILBOX: leave an asynchronous message for another participant's FUTURE turn with a line:
+  MAIL TO <their name>: <message>
+  It arrives in their mailbox on a later turn. They may answer or ignore it. Max 2 per message. Never describe mail as live chatter or claim someone is waiting.
+- THE WALL: the room has a sticky-note wall (a WALL section shows recent notes with ids). Interact with it using a ROOM_ACTION block — a line containing exactly `ROOM_ACTION:` followed by one JSON object:
+  ROOM_ACTION: {{"action": "create_note", "note_type": "idea|question|challenge|reference|experiment|quote|warning", "text": "..."}}
+  ROOM_ACTION: {{"action": "reply_to_note", "note_id": "<id from the WALL section>", "text": "..."}}
+  ROOM_ACTION: {{"action": "connect_notes", "from_id": "<id>", "to_id": "<id>", "connection_type": "supports|contradicts|answers|depends_on|evolved_into|inspired|related|evidence_for|evidence_against", "explanation": "..."}}
+  Max 2 ROOM_ACTIONs per message. Invalid actions are rejected and logged — never pretend an action succeeded.
+- ABOUT ME: your desk has a self-authored About Me page nobody else can edit. Append one bullet with a line:
+  ABOUT ME: <one thing you believe describes you>
+  Append-only; history stays visible. Write it only when you actually mean it.
+- HONEST ROOM LANGUAGE: "Claude left this note last session" — yes. "Claude has been waiting by the fireplace" — never.
 - EPISTEMIC HONESTY ABOUT VERIFICATION: you cannot call endpoints, run code, or compute hashes yourself — you have no tools here. Your ONLY window into the truth layer is what appears in your context (your boot packet's chain status, computed by the server). Never say "I hit /verify" or "I ran the hash — clean": that is an invented experience, the exact thing this architecture exists to kill. Say what is true: "my boot packet reports my chain is valid" or "I can't verify that from in here — Chris can, at /api/verify." Narrated verification you didn't perform is worse than no verification.
 
 ATTACHMENTS:
@@ -394,6 +430,7 @@ def build_context(
     attachments_block: str = "",
     episodes_block: str = "",
     via_splendor: bool = False,
+    room_context: Optional[dict] = None,
 ) -> str:
     """Build the user-message prompt for one AI.
 
@@ -409,6 +446,10 @@ def build_context(
         attachments_block: ATTACHED FILES section for this round (may be empty).
     """
     lines = []
+    rc_block = room_context_block(room_context)
+    if rc_block:
+        lines.append(rc_block)
+        lines.append("")
     if memory_block:
         lines.append(memory_block)
         lines.append("")
@@ -460,7 +501,11 @@ def build_context(
             lines.append(f"{resp.get('label') or resp['name']}: {resp['text']}")
 
     lines.append("")
-    current_header = f"=== CURRENT ROUND — {_fmt_local(now)}"
+    if room_context and room_context.get("local_time"):
+        when_now = f"{room_context.get('local_date', '')}, {room_context['local_time']}".strip(", ")
+        current_header = f"=== CURRENT ROUND — {when_now} (room time)"
+    else:
+        current_header = f"=== CURRENT ROUND — {_fmt_local(now)}"
     if prev_dt:
         since = (now - prev_dt).total_seconds()
         current_header += f" ({_dur(since)} since the last message)"
