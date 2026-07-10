@@ -37,6 +37,7 @@ import mailbox_store
 import memory_store
 import notebook_store
 import questions_store
+import receipt_store
 import room_actions
 import session_manager
 import settings_store
@@ -223,8 +224,9 @@ async def chat(request: ChatRequest):
         # and never shown to anyone else in the room.
         private = journal_store.boot_block(p["id"], p["name"])
         mailbox = mailbox_store.boot_block(p["id"])
+        receipts = receipt_store.boot_block(p["id"])
         mem = memory_block
-        for blk in (mailbox, private):
+        for blk in (mailbox, receipts, private):
             if blk:
                 mem = f"{blk}\n\n{mem}" if mem else blk
         return (
@@ -286,6 +288,8 @@ async def chat(request: ChatRequest):
                 entry = memory_store.add(m, author)
                 ledger.append(author, "memory_created", ref=entry["id"],
                               detail={"text": m[:200]})
+                receipt_store.issue(r["id"], "save_memory", "success",
+                                    {"memory_id": entry["id"]})
             r["memories_saved"] = len(memories)
         cleaned, notes_saved, pins_saved = notebook_store.extract(r["text"])
         if notes_saved or pins_saved:
@@ -294,10 +298,14 @@ async def chat(request: ChatRequest):
                 entry = notebook_store.add_entry(n, author)
                 ledger.append(author, "notebook_written", ref=entry["id"],
                               detail={"text": n[:200]})
+                receipt_store.issue(r["id"], "notebook_write", "success",
+                                    {"entry_id": entry["id"]})
             for q in pins_saved:
                 pin = notebook_store.add_pin(q, author)
                 ledger.append(author, "pin_created", ref=pin["id"],
                               detail={"quote": q[:200]})
+                receipt_store.issue(r["id"], "pin_quote", "success",
+                                    {"pin_id": pin["id"]})
             if notes_saved:
                 r["notebook_saved"] = len(notes_saved)
             if pins_saved:
@@ -316,6 +324,9 @@ async def chat(request: ChatRequest):
                                   ref=f"{r['id']}/v{entry['version']}",
                                   detail={"hash": entry["hash"],
                                           "recognized": entry["recognized"]})
+                    receipt_store.issue(r["id"], "journal_write", "success",
+                                        {"version": entry["version"],
+                                         "hash": entry["hash"][:12]})
             r["journal_saved"] = len(journal_entries)
         cleaned, asked = questions_store.extract(r["text"])
         if asked:
@@ -324,6 +335,8 @@ async def chat(request: ChatRequest):
                 q = questions_store.ask(author, qt, session["id"])
                 ledger.append(author, "question_asked", ref=q["id"],
                               detail={"question": qt[:200]})
+                receipt_store.issue(r["id"], "ask_chris", "success",
+                                    {"question_id": q["id"]})
             r["questions_asked"] = len(asked)
         cleaned, outgoing = mailbox_store.extract(r["text"], participants)
         if outgoing or cleaned != r["text"]:
@@ -333,6 +346,8 @@ async def chat(request: ChatRequest):
                                           m["recipient_name"], m["message"], session["id"])
                 ledger.append(author, "mailbox_sent", ref=item["id"],
                               detail={"to": m["recipient_name"], "chars": len(m["message"])})
+                receipt_store.issue(r["id"], "send_mail", "success",
+                                    {"to": m["recipient_name"], "mail_id": item["id"]})
             if outgoing:
                 r["mail_sent"] = len(outgoing)
         cleaned, abouts = about_store.extract(r["text"])
@@ -342,6 +357,8 @@ async def chat(request: ChatRequest):
                 entry = about_store.append(r["id"], line)
                 ledger.append(author, "about_me_written", ref=f"{r['id']}/v{entry['version']}",
                               detail={"text": line[:200]})
+                receipt_store.issue(r["id"], "about_me_append", "success",
+                                    {"version": entry["version"]})
             r["about_written"] = len(abouts)
         cleaned, action_results = room_actions.extract_and_apply(
             r["text"], author, session["id"])
@@ -349,6 +366,11 @@ async def chat(request: ChatRequest):
             r["text"] = cleaned
             if action_results:
                 r["room_actions"] = action_results
+                for a in action_results:
+                    receipt_store.issue(
+                        r["id"], f"room_action:{a.get('action', '?')}",
+                        "success" if a.get("ok") else "rejected",
+                        {"result": a.get("detail", "")})
 
     ok_count = sum(1 for r in responses if not r["text"].startswith("Error:"))
     if ok_count == len(responses):
@@ -777,6 +799,11 @@ async def verify_all():
             "last_entry_at": entries[-1]["ts"] if entries else None,
         })
     return {"participants": participants, "ledger": ledger.verify_chain()}
+
+
+@app.get("/api/receipts")
+async def get_receipts(participant: Optional[str] = None, limit: int = 50):
+    return {"receipts": receipt_store.list_receipts(participant, limit)}
 
 
 @app.get("/api/ledger")

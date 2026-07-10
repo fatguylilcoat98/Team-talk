@@ -198,9 +198,12 @@ def boot_block(participant_id: str, name: str) -> str:
     chain = verify(pid)
     status = "✓ hash chain valid" if chain["valid"] else \
         f"⚠ CHAIN BROKEN at entry v{chain['first_bad_version']} ({chain['reason']}) — treat later entries as unverified"
+    # A real verification receipt: the server recomputed the chain just now.
+    vrf = "vrf_" + _sha(f"{pid}:{chain['length']}:{entries[-1]['hash']}")[:10]
     lines = [
         f"=== YOUR PRIVATE JOURNAL ({name} only — authenticated records) ===",
-        f"({chain['length']} entries · {status} · latest hash {entries[-1]['hash'][:12]}…)",
+        f"({chain['length']} entries · {status} · latest hash {entries[-1]['hash'][:12]}… · "
+        f"verification receipt {vrf}, recomputed by the server for this turn)",
         "(These are records you wrote, not memories you experienced. Say 'my records show', never 'I remember'.)",
     ]
     for e in entries[-CONTEXT_ENTRIES:]:

@@ -1640,9 +1640,12 @@ function graveEl(n) {
     return el;
 }
 
+let wallTopZ = 5;
+
 function enableDrag(el, n) {
     let startX, startY, origL, origT, moved = false;
     el.addEventListener('pointerdown', (e) => {
+        el.style.zIndex = ++wallTopZ;   // bring to front on touch
         startX = e.clientX; startY = e.clientY;
         origL = el.offsetLeft; origT = el.offsetTop;
         moved = false;
@@ -1859,6 +1862,33 @@ async function renderDesk(pid) {
             `<div class="memory-item"><div class="memory-text">${escapeText(q.question)}</div><div class="memory-meta">${q.status}${q.answer ? ` · answered` : ''}</div></div>`);
         sect('📬 Mail on their desk', d.mail, (m) =>
             `<div class="memory-item"><div class="memory-text">${escapeText(m.message)}</div><div class="memory-meta">from ${escapeText(m.sender)} · ${(m.ts || '').slice(0, 10)} · ${m.delivered_at ? 'delivered' : 'waiting'}</div></div>`);
+
+        // Verify button: runs the REAL chain validation and shows the receipt
+        const verifyBtn = document.createElement('button');
+        verifyBtn.textContent = '🔐 Verify their journal chain now';
+        verifyBtn.addEventListener('click', async () => {
+            verifyBtn.disabled = true;
+            try {
+                const vres = await fetch(`/api/verify/${encodeURIComponent(pid)}`);
+                const v = await vres.json();
+                const line = document.createElement('p');
+                line.className = `field-note ${v.chain.valid ? 'v-ok' : 'v-bad'}`;
+                line.textContent = v.chain.valid
+                    ? `✓ SYSTEM RECEIPT: chain valid · ${v.chain.length} entries verified · ${v.last_verified} · latest ${String(v.latest_hash || '').slice(0, 12)}…`
+                    : `✗ SYSTEM RECEIPT: CHAIN BROKEN at v${v.chain.first_bad_version} (${v.chain.reason})`;
+                verifyBtn.after(line);
+            } catch (e) { alert(`Verify failed: ${e.message}`); }
+            verifyBtn.disabled = false;
+        });
+        view.appendChild(verifyBtn);
+
+        // Their action receipts — proof of what actually executed
+        try {
+            const rres = await fetch(`/api/receipts?participant=${encodeURIComponent(pid)}&limit=10`);
+            const rdata = await rres.json();
+            sect('🧾 Action receipts (server-executed)', [...rdata.receipts].reverse(), (rc) =>
+                `<div class="memory-item"><div class="memory-text">${rc.status === 'success' ? '✓' : '✗ REJECTED'} ${escapeText(rc.action)}</div><div class="memory-meta">${escapeText(rc.id)} · ${(rc.ts || '').slice(0, 16)}Z</div></div>`);
+        } catch (e) { /* receipts optional on desk */ }
     } catch (err) {
         view.innerHTML = `<p class="field-note">Could not open desk: ${escapeText(err.message)}</p>`;
     }
