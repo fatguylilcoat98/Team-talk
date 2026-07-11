@@ -1503,3 +1503,226 @@ button.danger:hover {
 @media (max-width: 800px) {
     .room-nav button { min-width: 21%; }
 }
+
+/* --- 🚂 The Train — witnessed co-op storytelling --------------------------- */
+
+.train-tools {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.train-tools select {
+    flex: 1;
+    min-width: 0;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.game-create {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.game-create input {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    width: 100%;
+}
+
+.game-create-row {
+    display: flex;
+    gap: 8px;
+}
+
+.game-create-row select {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.game-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+#game-view-title {
+    font-weight: 700;
+    color: var(--chris);
+}
+
+.game-canon {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    margin-bottom: 10px;
+    max-height: 40vh;
+    overflow-y: auto;
+    font-size: 0.88rem;
+}
+
+.canon-fact {
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: baseline;
+    transition: background 0.4s;
+}
+
+.canon-fact code {
+    color: #8fd3a8;
+    font-size: 0.78rem;
+}
+
+.canon-fact .canon-text { flex: 1; min-width: 180px; }
+.canon-fact .canon-meta { color: var(--text-dim); font-size: 0.75rem; }
+
+.canon-void .canon-text {
+    text-decoration: line-through;
+    color: var(--text-dim);
+}
+
+.canon-retcon {
+    width: 100%;
+    color: #e09090;
+    font-size: 0.8rem;
+}
+
+.canon-retcon-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    font-size: 0.72rem;
+    padding: 1px 7px;
+    cursor: pointer;
+}
+
+.canon-retcon-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+.canon-hit { background: rgba(232, 176, 75, 0.18); }
+
+.game-feed {
+    max-height: 52vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.game-turn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.game-turn-n {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+}
+
+.game-move {
+    color: var(--chris);
+    font-size: 0.92rem;
+    margin-bottom: 4px;
+}
+
+.game-move strong { color: var(--chris); }
+
+.game-narration {
+    white-space: pre-wrap;
+    margin-top: 6px;
+}
+
+.cite-chip {
+    background: rgba(143, 211, 168, 0.12);
+    border: 1px solid rgba(143, 211, 168, 0.4);
+    color: #8fd3a8;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-family: monospace;
+    padding: 0 5px;
+    cursor: pointer;
+    vertical-align: baseline;
+}
+
+.game-facts-new {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: #8fd3a8;
+}
+
+.game-facts-new code {
+    background: rgba(143, 211, 168, 0.12);
+    border-radius: 5px;
+    padding: 0 5px;
+}
+
+.game-flag {
+    margin-top: 8px;
+    background: rgba(208, 85, 85, 0.15);
+    border: 1px solid var(--danger);
+    color: #f0b0b0;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+}
+
+.game-move-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.game-move-row label {
+    min-width: 72px;
+    padding-top: 8px;
+    color: var(--chris);
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.game-move-row textarea {
+    flex: 1;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.game-turn-btn { width: 100%; }
+
+@media (max-width: 800px) {
+    .game-create-row { flex-direction: column; }
+    .game-feed { max-height: none; }
+    .game-move-row label { min-width: 58px; font-size: 0.82rem; }
+}

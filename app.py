@@ -31,6 +31,8 @@ import brain
 import director
 import episode_store
 import file_store
+import game_master
+import game_store
 import history_store
 import journal_store
 import ledger
@@ -1004,6 +1006,133 @@ async def clear_notebook():
     removed = notebook_store.clear()
     ledger.append("Chris", "notebook_cleared", detail={"tombstoned": removed})
     return {"status": "cleared", "removed": removed}
+
+
+# --- 🚂 The Train: witnessed co-op storytelling -------------------------------
+
+class GameCreate(BaseModel):
+    title: str
+    players: List[str]          # 1-2 player names (Chris + guest)
+    gm_id: str                  # roster participant who runs the world
+
+
+class GameMove(BaseModel):
+    player: str
+    text: str
+
+
+class GameRetcon(BaseModel):
+    fact_id: str
+    reason: str
+    replacement: Optional[str] = ""
+
+
+def _gm_participant(game: dict) -> Optional[dict]:
+    return next((p for p in settings_store.get_participants()
+                 if p["id"] == game["gm"]["id"]), None)
+
+
+@app.get("/api/games")
+async def games_list():
+    return {"games": game_store.list_games()}
+
+
+@app.post("/api/games")
+async def games_create(body: GameCreate):
+    gm = next((p for p in settings_store.get_participants()
+               if p["id"] == body.gm_id), None)
+    if not gm:
+        raise HTTPException(status_code=400, detail="Pick a Game Master from the roster")
+    game = game_store.create_game(body.title, body.players, gm["id"], gm["name"])
+    if not game:
+        raise HTTPException(status_code=400, detail="A title and at least one player are required")
+    ledger.append("Chris", "game_created", ref=game["id"],
+                  detail={"title": game["title"],
+                          "players": [p["name"] for p in game["players"]],
+                          "gm": game["gm"]["name"]})
+    return game
+
+
+@app.get("/api/games/{game_id}")
+async def games_get(game_id: str):
+    game = game_store.load_game(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    return game
+
+
+@app.post("/api/games/{game_id}/move")
+async def games_move(game_id: str, body: GameMove):
+    game = game_store.load_game(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if not game_store.submit_move(game, body.player, body.text):
+        raise HTTPException(status_code=400, detail="Empty move or unknown player")
+    return {"status": "queued", "pending": sorted(game["pending"].keys())}
+
+
+@app.post("/api/games/{game_id}/turn")
+async def games_turn(game_id: str):
+    """The GM plays the turn over whatever moves are queued. Every canon
+    write gets a ledger event; hallucinated citations get flagged AND
+    ledgered; the GM's receipt says exactly what landed."""
+    game = game_store.load_game(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if not game.get("pending"):
+        raise HTTPException(status_code=400, detail="No moves queued — submit a move first")
+    gm = _gm_participant(game)
+    turn = await game_master.play_turn(game, gm)
+    if not turn["ok"]:
+        raise HTTPException(status_code=503, detail=turn["narration"])
+    gm_name = game["gm"]["name"]
+    ledger.append(gm_name, "game_turn_played", ref=f"{game_id}/t{turn['n']}",
+                  detail={"facts": len(turn["facts_created"]),
+                          "cited": len(turn["cited"]),
+                          "flags": len(turn["flags"])})
+    for fid in turn["facts_created"]:
+        fact = game_store.get_fact(game, fid)
+        ledger.append(gm_name, "game_fact_created", ref=f"{game_id}/{fid}",
+                      detail={"text": (fact or {}).get("text", "")[:200]})
+    for flag in turn["flags"]:
+        ledger.append(gm_name, "game_fact_cited_invalid",
+                      ref=f"{game_id}/t{turn['n']}", detail={"flag": flag})
+    receipt_store.issue(
+        game["gm"]["id"], "game_turn",
+        "rejected" if turn["flags"] else "success",
+        {"game": game["title"][:60], "turn": turn["n"],
+         "facts_created": len(turn["facts_created"]),
+         **({"flags": turn["flags"][:3]} if turn["flags"] else {})})
+    return {"game_id": game_id, "turn": turn,
+            "facts": game["facts"], "canon": game_store.verify_canon(game)}
+
+
+@app.post("/api/games/{game_id}/retcon")
+async def games_retcon(game_id: str, body: GameRetcon):
+    """Chris voids a fact — visibly, reason on the record, original kept."""
+    game = game_store.load_game(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if not body.reason.strip():
+        raise HTTPException(status_code=400, detail="A retcon needs a reason — it goes on the record")
+    result = game_store.retcon(game, body.fact_id, "Chris",
+                               body.reason, body.replacement or "")
+    if not result:
+        raise HTTPException(status_code=404, detail="Canon fact not found (already void?)")
+    ledger.append("Chris", "game_retcon", ref=f"{game_id}/{body.fact_id}",
+                  detail={"reason": body.reason[:200],
+                          "replaced_by": (result["replacement"] or {}).get("id")
+                          if result["replacement"] else None})
+    return result
+
+
+@app.get("/api/games/{game_id}/verify")
+async def games_verify(game_id: str):
+    game = game_store.load_game(game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    return {"game_id": game_id, "canon": game_store.verify_canon(game),
+            "facts": len(game["facts"])}
 
 
 # --- 🎬 Director's Cut --------------------------------------------------------
