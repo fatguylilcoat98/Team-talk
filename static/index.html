@@ -38,6 +38,7 @@
             <button data-area="desks" title="Participant desks — journals, About Me, mail">&#129681; Desks</button>
             <button data-area="history" title="Room History — the museum of milestones">&#128220; History</button>
             <button data-area="train" title="The Train — witnessed co-op storytelling with an AI Game Master">&#128642; Train</button>
+            <button data-area="workshop" title="The Workshop — the gatekept bench where the AIs work between your messages">&#128296; Workshop</button>
         </nav>
 
         <div id="area-foyer" class="room-area hidden">
@@ -123,6 +124,42 @@
                 <button id="game-turn-btn" class="primary game-turn-btn">&#127922; Play the turn</button>
             </div>
             <p class="field-note" id="train-hint">The game Chris wanted on the Sacramento&rarr;Bakersfield train — rebuilt with the room's rules. Fiction requires invention; only <em>unregistered</em> invention is the enemy.</p>
+        </div>
+
+        <div id="area-workshop" class="room-area hidden">
+            <div id="ws-empty" class="hidden">
+                <button id="ws-new-toggle">+ Open a target</button>
+                <div id="ws-create" class="game-create hidden">
+                    <textarea id="ws-goal" maxlength="2000" rows="2" placeholder="The goal — what should the seats build or fix?"></textarea>
+                    <div class="game-create-row">
+                        <input type="text" id="ws-filename" maxlength="80" placeholder="artifact filename (e.g. spec.md)">
+                        <select id="ws-check-mode">
+                            <option value="manual">Judge: I rule manually</option>
+                            <option value="script">Judge: check script (code decides)</option>
+                        </select>
+                    </div>
+                    <textarea id="ws-content" maxlength="60000" rows="4" placeholder="Seed content for the artifact (can be empty)"></textarea>
+                    <textarea id="ws-check" maxlength="60000" rows="4" class="hidden" placeholder="check.py — runs against the artifact; exit 0 = pass. ⚠ This executes on your server."></textarea>
+                    <button id="ws-open-btn" class="primary">Open Target</button>
+                </div>
+            </div>
+            <div id="ws-active" class="hidden">
+                <div class="ws-head">
+                    <div id="ws-goal-view"></div>
+                    <div id="ws-meta" class="field-note"></div>
+                </div>
+                <div id="ws-seats" class="ws-seats"></div>
+                <div class="ws-actions">
+                    <button id="ws-cycle-btn" class="primary">&#9654; Run a work cycle</button>
+                    <label class="awards-label" title="Run a cycle automatically after every chat round"><input type="checkbox" id="ws-auto"> auto</label>
+                    <button id="ws-ship-btn" title="Close the target as done — final version on the record">&#128230; Ship it</button>
+                </div>
+                <h3 class="nb-heading">Live artifact <span id="ws-live-v"></span></h3>
+                <pre id="ws-live" class="ws-artifact"></pre>
+                <h3 class="nb-heading">The chain — every submission, kept forever</h3>
+                <div id="ws-versions" class="memory-list"></div>
+            </div>
+            <p class="field-note">One target, one artifact, one judge. Edits land only if the check passes; a fail is reverted, receipted &#10007; REJECTED, and locks the seat for a cycle. Eloquence scores nothing here.</p>
         </div>
 
         <div id="area-living" class="room-area">
