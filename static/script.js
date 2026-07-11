@@ -1620,6 +1620,11 @@ async function renderFoyer() {
             ['TRUTH STATUS', `${f.ledger_valid ? '✓ ledger valid' : '✗ LEDGER BROKEN'} · ${f.ledger_events} events · ${f.journal_entries} journal entries`],
             ['ARCHIVE', `${f.sessions} sessions on record · app v${f.version}`],
         ];
+        if (f.failures && f.failures.entries > 0) {
+            const parts = Object.entries(f.failures.seats)
+                .map(([seat, s]) => `${seat}: ${s.final_failures} failed / ${s.recovered} recovered`);
+            rows.push(['API FAILURES', `${parts.join(' · ')} (${f.failures.label})`]);
+        }
         grid.innerHTML = '';
         for (const [k, v] of rows) {
             const row = document.createElement('div');

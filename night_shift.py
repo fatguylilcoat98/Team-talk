@@ -256,7 +256,9 @@ async def run_round(participants: List[dict]) -> dict:
                                 dissent_round)
         ctx = _context(run)
         cap = p.get("max_tokens") or REPLY_TOKENS
-        result = await api_client.call_participant(p, system, ctx, max_tokens=cap)
+        result = await api_client.call_participant(
+            p, system, ctx, max_tokens=cap, context="night", run_id=run["id"],
+            run_budget_remaining=run["budget_tokens"] - run["spent_tokens"])
         msg = {
             "id": p.get("id", ""),
             "name": p.get("name", "AI"),
@@ -345,8 +347,10 @@ async def write_report(participants: List[dict]) -> Optional[dict]:
                     "RECOMMENDATION (one paragraph, actionable)\n"
                     "No STANCE line needed — the shift is over.")
         cap = max(reporter.get("max_tokens") or 0, REPORT_TOKENS)
-        result = await api_client.call_participant(reporter, system, prompt,
-                                                   max_tokens=cap)
+        result = await api_client.call_participant(
+            reporter, system, prompt, max_tokens=cap, context="night",
+            run_id=run["id"],
+            run_budget_remaining=run["budget_tokens"] - run["spent_tokens"])
         if result.get("ok"):
             run["report"] = result.get("text", "")
             run["reporter"] = reporter.get("name", "AI")

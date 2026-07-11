@@ -31,6 +31,7 @@ import brain
 import code_access
 import director
 import episode_store
+import failure_log
 import file_store
 import game_master
 import game_store
@@ -282,7 +283,8 @@ async def chat(request: ChatRequest):
         so_far = []
         for p in order:
             system, ctx = prompt_for(p, so_far)
-            result = await api_client.call_participant(p, system, ctx, images=images)
+            result = await api_client.call_participant(
+                p, system, ctx, images=images, context="chat", session_id=session["id"])
             if result["ok"]:
                 so_far.append({"name": display[p["id"]], "text": _strip_markers(result["text"])})
             responses.append(_response_entry(p, result, labels.get(p["id"])))
@@ -290,7 +292,8 @@ async def chat(request: ChatRequest):
         # The core requirement: every AI is called at the same time
         prompts = [prompt_for(p) for p in participants]
         results = await asyncio.gather(
-            *[api_client.call_participant(p, s, c, images=images)
+            *[api_client.call_participant(p, s, c, images=images, context="chat",
+                                          session_id=session["id"])
               for p, (s, c) in zip(participants, prompts)]
         )
         responses = [_response_entry(p, r, labels.get(p["id"]))
@@ -701,7 +704,16 @@ async def foyer():
         "history_pending": len(history_store.list_entries("pending")),
         "version": APP_VERSION,
         "location_setting": settings_store.resolve("location", "ROOM_LOCATION", "") or "",
+        "failures": failure_log.window_counts(),
     }
+
+
+@app.get("/api/failures")
+async def failures():
+    """Per-seat failure counts from the LIVE log only — labeled 'current
+    log window' because rotation resets it (the room's own /status rule:
+    never promise a time window the retention policy can't back)."""
+    return {**failure_log.window_counts(), "recent": failure_log.recent(50)}
 
 
 class NoteCreate(BaseModel):
