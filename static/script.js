@@ -626,7 +626,8 @@ function renderLegend() {
         dot.className = 'dot';
         dot.style.background = p.color || '#93a0b8';
         item.appendChild(dot);
-        item.appendChild(document.createTextNode(p.name));
+        item.appendChild(document.createTextNode(p.resting ? `${p.name} 😴` : p.name));
+        if (p.resting) item.style.opacity = '0.45';
         legendDiv.appendChild(item);
     }
     // The silent sixth chair: present, watching, never speaking
@@ -717,6 +718,17 @@ function participantCard(p = {}, keyHint = null) {
     nameInput.placeholder = 'Name (e.g. Grok)';
     nameInput.value = p.name || '';
     head.appendChild(nameInput);
+
+    const restLabel = document.createElement('label');
+    restLabel.className = 'p-rest-label';
+    restLabel.title = 'Seat stays configured (key kept) but is not called — for empty credits or broken provider consoles';
+    const restBox = document.createElement('input');
+    restBox.type = 'checkbox';
+    restBox.className = 'p-resting';
+    restBox.checked = !!p.resting;
+    restLabel.appendChild(restBox);
+    restLabel.appendChild(document.createTextNode(' 😴'));
+    head.appendChild(restLabel);
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -819,6 +831,7 @@ function collectParticipants() {
             api_key: card.querySelector('.p-key').value.trim() || null,
             base_url: card.querySelector('.p-url').value.trim() || null,
             persona: card.querySelector('.p-persona').value.trim() || null,
+            resting: card.querySelector('.p-resting') ? card.querySelector('.p-resting').checked : false,
         });
     }
     return roster;

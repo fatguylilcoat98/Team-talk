@@ -108,6 +108,7 @@ class ParticipantUpdate(BaseModel):
     base_url: Optional[str] = None
     color: Optional[str] = None
     persona: Optional[str] = None  # character to play, e.g. "a pirate who doesn't give a shit"
+    resting: Optional[bool] = False  # seat stays configured but isn't called
 
 
 class SettingsUpdate(BaseModel):
@@ -214,7 +215,11 @@ async def chat(request: ChatRequest):
             ledger.append("Chris", "room_context_changed",
                           detail={"from": prev_rc["location"], "to": rc["location"]})
 
-    participants = settings_store.get_participants()
+    participants = [p for p in settings_store.get_participants()
+                    if not p.get("resting")]
+    if not participants:
+        raise HTTPException(status_code=400,
+                            detail="Every seat is resting — wake at least one in Settings.")
 
     # Blind mode: names, personas, roles, and awards are all stripped — the
     # AIs see (and are) anonymous "Voice N" labels, stable within a session.
@@ -454,7 +459,8 @@ async def _workshop_cycle_task() -> dict:
     The lock keeps cycles sequential — overlapping cycles would race on
     the version chain."""
     async with _workshop_cycle_running:
-        participants = settings_store.get_participants()
+        participants = [p for p in settings_store.get_participants()
+                        if not p.get("resting")]
         report = await workshop_engine.run_cycle(participants)
         if not report["ran"]:
             return report
@@ -534,6 +540,7 @@ def _public_participants() -> List[dict]:
             "base_url": p.get("base_url", ""),
             "color": p.get("color", "#93a0b8"),
             "persona": p.get("persona", ""),
+            "resting": bool(p.get("resting")),
             "api_key_masked": settings_store.mask_key(p.get("api_key")),
             "uses_shared_key": not p.get("api_key"),
         })

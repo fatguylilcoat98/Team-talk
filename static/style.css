@@ -1803,3 +1803,13 @@ button.danger:hover {
 }
 
 #ws-check { font-family: monospace; font-size: 0.8rem; }
+
+.p-rest-label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+}
