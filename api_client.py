@@ -132,14 +132,18 @@ def _rate_limit_message(name: str, e: Exception) -> str:
     return f"Error: {name}'s API is rate limited — wait a moment and retry."
 
 
-async def call_participant(p: dict, system: str, prompt: str, images: list = None) -> dict:
+async def call_participant(p: dict, system: str, prompt: str, images: list = None,
+                           max_tokens: int = None) -> dict:
     """Call one AI with its system prompt + built context.
 
     images: [{"media_type": "image/png", "data": "<base64>"}] — attached
     pictures from this round, passed natively so vision models can see them.
+    max_tokens: caller override for long-form work (Workshop bench turns
+    carry a whole artifact and were getting cut off at the chat budget).
 
     Returns {text, tokens, ok} — never raises.
     """
+    call_budget = max_tokens or MAX_TOKENS
     name = p.get("name", "AI")
     key = participant_key(p)
     if not key:
@@ -162,7 +166,7 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
                 content = prompt
             response = await client.messages.create(
                 model=p["model"],
-                max_tokens=MAX_TOKENS,
+                max_tokens=call_budget,
                 system=system,
                 messages=[{"role": "user", "content": content}],
             )
@@ -182,7 +186,8 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
                 {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ]
-            budget = REASONING_MAX_TOKENS if p["model"] in _reasoning_models else MAX_TOKENS
+            budget = max(call_budget,
+                         REASONING_MAX_TOKENS if p["model"] in _reasoning_models else 0)
             response = await client.chat.completions.create(
                 model=p["model"], max_tokens=budget, messages=messages,
             )
