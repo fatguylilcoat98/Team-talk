@@ -90,12 +90,21 @@ def event_hash(seq: int, ts: str, actor: str, action: str, ref: str,
 
 
 def append(actor: str, action: str, ref: str = "", detail: Optional[dict] = None) -> dict:
-    """Append one event to the chain. Never raises to the caller's flow."""
+    """Append one event to the chain. Never raises to the caller's flow.
+
+    Room-Claude's catch (the first code-not-conversation bug on record):
+    the old fallback re-rooted at GENESIS after a corrupt tail line, which
+    silently FORKED the ledger — everything after the corruption formed a
+    second, internally-valid chain that verify_chain never surfaced. Now:
+    chain from the last PARSEABLE event, so post-corruption events stay
+    linked to real history and the corrupt line remains the one visible
+    scar instead of becoming a hidden graft point."""
     if action not in ACTIONS:
         action = f"other:{action}"[:60]
-    last = _last_event()
-    seq = (last.get("seq", 0) + 1) if last and not last.get("_corrupt") else (len(_read_all()) + 1)
-    prev_hash = last.get("hash", GENESIS) if last and not last.get("_corrupt") else GENESIS
+    events = _read_all()
+    last_valid = next((e for e in reversed(events) if not e.get("_corrupt")), None)
+    seq = (last_valid.get("seq", 0) + 1) if last_valid else (len(events) + 1)
+    prev_hash = last_valid.get("hash", GENESIS) if last_valid else GENESIS
     ts = _now()
     detail = detail or {}
     content_hash = _sha(_canonical(detail))
@@ -120,27 +129,45 @@ def append(actor: str, action: str, ref: str = "", detail: Optional[dict] = None
 
 
 def verify_chain() -> dict:
-    """Recompute the whole chain. One modified byte fails everything after it."""
+    """Recompute the whole chain. One modified byte fails everything after it.
+
+    Room-Claude's second point, same catch: the old version SHORT-CIRCUITED
+    at the first failure — honest about too small a territory. A reader saw
+    "one break at seq N" and never learned that a self-consistent sub-chain
+    re-rooted at GENESIS right after it (the fork masquerading as history).
+    Now the walk covers the WHOLE file: every break counted, every mid-file
+    GENESIS re-root reported by seq. first_bad_seq/reason keep their old
+    meaning (the first failure) for existing readers."""
     events = _read_all()
     prev = GENESIS
+    breaks = []
+    reroots = []
     for i, e in enumerate(events):
         if e.get("_corrupt"):
-            return {"valid": False, "length": len(events), "first_bad_seq": i + 1,
-                    "reason": "unparseable line"}
+            breaks.append({"seq": i + 1, "reason": "unparseable line"})
+            prev = None      # chain identity is lost until the next event re-anchors
+            continue
         expected = event_hash(e.get("seq", 0), e.get("ts", ""), e.get("actor", ""),
                               e.get("action", ""), e.get("ref", ""),
                               e.get("content_hash", ""), e.get("prev_hash", ""))
-        if e.get("prev_hash") != prev:
-            return {"valid": False, "length": len(events), "first_bad_seq": e.get("seq", i + 1),
-                    "reason": "broken chain link"}
+        if i > 0 and e.get("prev_hash") == GENESIS:
+            reroots.append(e.get("seq", i + 1))
+        if prev is not None and e.get("prev_hash") != prev:
+            breaks.append({"seq": e.get("seq", i + 1), "reason": "broken chain link"})
         if e.get("hash") != expected:
-            return {"valid": False, "length": len(events), "first_bad_seq": e.get("seq", i + 1),
-                    "reason": "event hash mismatch"}
-        if _sha(_canonical(e.get("detail", {}))) != e.get("content_hash"):
-            return {"valid": False, "length": len(events), "first_bad_seq": e.get("seq", i + 1),
-                    "reason": "content hash mismatch"}
+            breaks.append({"seq": e.get("seq", i + 1), "reason": "event hash mismatch"})
+        elif _sha(_canonical(e.get("detail", {}))) != e.get("content_hash"):
+            breaks.append({"seq": e.get("seq", i + 1), "reason": "content hash mismatch"})
         prev = e.get("hash")
-    return {"valid": True, "length": len(events), "first_bad_seq": None, "reason": None}
+    first = breaks[0] if breaks else None
+    return {
+        "valid": not breaks and not reroots,
+        "length": len(events),
+        "first_bad_seq": first["seq"] if first else (reroots[0] if reroots else None),
+        "reason": first["reason"] if first else ("mid-chain GENESIS re-root (fork)" if reroots else None),
+        "breaks": len(breaks) + len(reroots),
+        "genesis_reroots": reroots,
+    }
 
 
 def list_events(actor: Optional[str] = None, action: Optional[str] = None,
