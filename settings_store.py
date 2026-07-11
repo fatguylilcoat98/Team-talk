@@ -213,6 +213,14 @@ def sanitize_participants(incoming: List[dict]) -> List[dict]:
         # called — for empty credit balances and broken provider consoles.
         if p.get("resting"):
             clean["resting"] = True
+        # Cost cap: hard per-call output ceiling for this seat (reasoning
+        # tokens included). Clamped to a sane range; 0/blank = no cap.
+        try:
+            cap = int(p.get("max_tokens") or 0)
+        except (TypeError, ValueError):
+            cap = 0
+        if cap:
+            clean["max_tokens"] = max(500, min(cap, 16000))
         roster.append(clean)
     return roster
 

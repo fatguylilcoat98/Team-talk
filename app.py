@@ -109,6 +109,7 @@ class ParticipantUpdate(BaseModel):
     color: Optional[str] = None
     persona: Optional[str] = None  # character to play, e.g. "a pirate who doesn't give a shit"
     resting: Optional[bool] = False  # seat stays configured but isn't called
+    max_tokens: Optional[int] = None  # per-seat output cost cap (0/None = default)
 
 
 class SettingsUpdate(BaseModel):
@@ -541,6 +542,7 @@ def _public_participants() -> List[dict]:
             "color": p.get("color", "#93a0b8"),
             "persona": p.get("persona", ""),
             "resting": bool(p.get("resting")),
+            "max_tokens": p.get("max_tokens") or 0,
             "api_key_masked": settings_store.mask_key(p.get("api_key")),
             "uses_shared_key": not p.get("api_key"),
         })
