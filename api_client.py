@@ -164,10 +164,17 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
                 content.append({"type": "text", "text": prompt})
             else:
                 content = prompt
+            # Prompt caching: the system prompt (room rules, truth layer,
+            # modes) is identical across a seat's calls within a session.
+            # cache_control makes Anthropic bill repeats at ~10% instead of
+            # full price — Chris's dashboard showed a 0% hit rate while the
+            # Claude seat was his most expensive by 10x. Cache TTL is 5 min,
+            # which live rounds easily beat. Zero behavior change.
             response = await client.messages.create(
                 model=p["model"],
                 max_tokens=call_budget,
-                system=system,
+                system=[{"type": "text", "text": system,
+                         "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": content}],
             )
             text = "".join(b.text for b in response.content if b.type == "text")
