@@ -16,10 +16,15 @@ from typing import List, Optional
 import api_client
 import workshop_store
 
-FENCE = re.compile(r"```workshop\s*\n(.*?)```", re.DOTALL)
+# GREEDY to the LAST closing fence: artifacts are specs and code, and
+# specs contain their own ``` blocks. The non-greedy version cut every
+# submission at its first inner fence — the room spent ten cycles
+# rewriting a spec my regex kept truncating. NOTE: comes after the close.
+FENCE = re.compile(r"```workshop\s*\n(.*)\n?```", re.DOTALL)
 PASS_RE = re.compile(r"^\s*PASS\b", re.IGNORECASE)
 CHECK_TIMEOUT = 30
 MAX_NOTE = 200
+BENCH_MAX_TOKENS = int(os.getenv("WORKSHOP_MAX_TOKENS", "6000"))
 
 
 def _system_prompt(seat_name: str, target: dict) -> str:
@@ -117,6 +122,21 @@ async def run_cycle(participants: List[dict]) -> dict:
     if not target or target.get("status") != "active":
         return report
 
+    # Manual-judge mode: the bench WAITS FOR THE JUDGE. Cycling while
+    # rulings are pending just piles up blind rewrites (the seats can't
+    # see each other's pending content) and burns Chris's API budget —
+    # ten cycles of that taught us this rule.
+    if target.get("check_mode") == "manual":
+        chain = workshop_store.list_versions(500)
+        ruled = {e["verdict_for"] for e in chain if e.get("verdict_for")}
+        pending = [e for e in chain
+                   if not e.get("verdict_for")
+                   and e.get("check", {}).get("status") == "pending"
+                   and e.get("v") not in ruled]
+        if pending:
+            report["waiting_on_judge"] = len(pending)
+            return report
+
     workshop_store.tick_locks(state)
     state["cycles"] = state.get("cycles", 0) + 1
     report["ran"] = True
@@ -138,7 +158,8 @@ async def run_cycle(participants: List[dict]) -> dict:
         live_content = workshop_store.read_version(live["v"]) if live else ""
         system = _system_prompt(p["name"], target)
         ctx = _bench_context(target, live_content or "", cycle_log, recent_failures)
-        result = await api_client.call_participant(p, system, ctx)
+        result = await api_client.call_participant(
+            p, system, ctx, max_tokens=BENCH_MAX_TOKENS)
         if not result.get("ok"):
             turn["action"] = "error"
             turn["note"] = result.get("text", "")[:200]

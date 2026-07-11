@@ -28,6 +28,7 @@ from pydantic import BaseModel
 import about_store
 import api_client
 import brain
+import code_access
 import director
 import episode_store
 import file_store
@@ -197,6 +198,7 @@ async def chat(request: ChatRequest):
                   history_store.context_block(),
                   questions_store.context_block(),
                   workshop_store.context_block(settings_store.get_participants()),
+                  code_access.index_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
             memory_block = f"{memory_block}\n\n{block}" if memory_block else block
@@ -232,8 +234,9 @@ async def chat(request: ChatRequest):
         private = journal_store.boot_block(p["id"], p["name"])
         mailbox = mailbox_store.boot_block(p["id"])
         receipts = receipt_store.boot_block(p["id"])
+        code_files = code_access.boot_block(p["id"])
         mem = memory_block
-        for blk in (mailbox, receipts, private):
+        for blk in (code_files, mailbox, receipts, private):
             if blk:
                 mem = f"{blk}\n\n{mem}" if mem else blk
         return (
@@ -256,6 +259,7 @@ async def chat(request: ChatRequest):
         text, _ = questions_store.extract(text)
         text, _ = mailbox_store.extract(text, participants)
         text, _ = about_store.extract(text)
+        text, _ = code_access.extract(text)
         text = room_actions._ACTION_LINE.sub("", text).strip()
         return text
 
@@ -367,6 +371,26 @@ async def chat(request: ChatRequest):
                 receipt_store.issue(r["id"], "about_me_append", "success",
                                     {"version": entry["version"]})
             r["about_written"] = len(abouts)
+        cleaned, code_requests = code_access.extract(r["text"])
+        if code_requests or cleaned != r["text"]:
+            r["text"] = cleaned
+            granted = 0
+            for filename in code_requests:
+                if code_access.queue(r["id"], filename):
+                    granted += 1
+                    ledger.append(author, "code_read", ref=filename,
+                                  detail={"delivered": "next boot packet"})
+                    receipt_store.issue(r["id"], "read_code", "success",
+                                        {"file": filename,
+                                         "delivery": "your next turn"})
+                else:
+                    ledger.append(author, "code_read", ref=filename,
+                                  detail={"rejected": "not on the index"})
+                    receipt_store.issue(r["id"], "read_code", "rejected",
+                                        {"file": filename,
+                                         "reason": "not on the CODE INDEX"})
+            if granted:
+                r["code_requested"] = granted
         cleaned, action_results = room_actions.extract_and_apply(
             r["text"], author, session["id"])
         if action_results or cleaned != r["text"]:
