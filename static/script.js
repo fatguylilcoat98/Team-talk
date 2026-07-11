@@ -764,6 +764,7 @@ function participantCard(p = {}, keyHint = null) {
     grid.appendChild(pField('Provider', providerSelect(p.provider)));
     grid.appendChild(pField('Model', pInput('p-model', 'text', p.model || '', 'e.g. gpt-4o-mini')));
     grid.appendChild(pField('Base URL', pInput('p-url', 'text', p.base_url || '', 'blank for Anthropic/OpenAI')));
+    grid.appendChild(pField('Max reply tokens (cost cap)', pInput('p-maxtok', 'number', p.max_tokens || '', 'blank = default · reasoning models: 3000+ or replies may come back empty')));
     adv.appendChild(grid);
     card.appendChild(adv);
 
@@ -832,6 +833,7 @@ function collectParticipants() {
             base_url: card.querySelector('.p-url').value.trim() || null,
             persona: card.querySelector('.p-persona').value.trim() || null,
             resting: card.querySelector('.p-resting') ? card.querySelector('.p-resting').checked : false,
+            max_tokens: parseInt(card.querySelector('.p-maxtok') && card.querySelector('.p-maxtok').value, 10) || null,
         });
     }
     return roster;

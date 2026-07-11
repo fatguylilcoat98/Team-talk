@@ -143,7 +143,12 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
 
     Returns {text, tokens, ok} — never raises.
     """
-    call_budget = max_tokens or MAX_TOKENS
+    # Budget order: explicit caller override (Workshop bench) > the seat's
+    # own cost cap from Settings > the global default. A seat cap is a hard
+    # ceiling Chris chose — it also wins over the reasoning-model escalation
+    # below, because its whole point is bounding worst-case spend.
+    seat_cap = p.get("max_tokens")
+    call_budget = max_tokens or seat_cap or MAX_TOKENS
     name = p.get("name", "AI")
     key = participant_key(p)
     if not key:
@@ -193,8 +198,13 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
                 {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ]
-            budget = max(call_budget,
-                         REASONING_MAX_TOKENS if p["model"] in _reasoning_models else 0)
+            if max_tokens:
+                budget = max_tokens  # explicit caller override is exact
+            elif seat_cap:
+                budget = seat_cap    # Chris's cap is absolute — no escalation
+            else:
+                budget = max(call_budget,
+                             REASONING_MAX_TOKENS if p["model"] in _reasoning_models else 0)
             response = await client.chat.completions.create(
                 model=p["model"], max_tokens=budget, messages=messages,
             )
@@ -202,7 +212,10 @@ async def call_participant(p: dict, system: str, prompt: str, images: list = Non
             text = choice.message.content or ""
             tokens = response.usage.completion_tokens if response.usage else 0
             if not text.strip() and getattr(choice, "finish_reason", "") == "length" \
-                    and budget < REASONING_MAX_TOKENS:
+                    and budget < REASONING_MAX_TOKENS and not seat_cap:
+                # (A seat with an explicit cost cap never escalates — the cap
+                # is Chris bounding worst-case spend; an empty reply under it
+                # returns the honest error instead of a surprise bill.)
                 # Reasoning models (Muse Spark, DeepSeek R1, o-series) can burn
                 # the whole budget on internal thinking and get cut off before
                 # writing a single visible word. Retry once with real headroom —
