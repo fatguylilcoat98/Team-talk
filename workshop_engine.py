@@ -159,7 +159,7 @@ async def run_cycle(participants: List[dict]) -> dict:
         system = _system_prompt(p["name"], target)
         ctx = _bench_context(target, live_content or "", cycle_log, recent_failures)
         result = await api_client.call_participant(
-            p, system, ctx, max_tokens=BENCH_MAX_TOKENS)
+            p, system, ctx, max_tokens=BENCH_MAX_TOKENS, context="workshop")
         if not result.get("ok"):
             turn["action"] = "error"
             turn["note"] = result.get("text", "")[:200]
