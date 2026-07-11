@@ -75,6 +75,45 @@ except OSError:
     APP_VERSION = "0"
 
 
+def _ledger_deploy_once() -> None:
+    """Every deploy becomes a chain event. The room's provenance demand
+    (Gemini/Muse, the v6 round): 'if it isn't in the chain, it's just a
+    story.' The event carries the git commit hash and subject — and the
+    commit message is where each change's receipts live — so code and
+    chain reference each other from both sides."""
+    marker = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "memory", "deployed_version.txt")
+    try:
+        with open(marker, "r", encoding="utf-8") as f:
+            if f.read().strip() == APP_VERSION:
+                return
+    except OSError:
+        pass
+    commit, subject = "", ""
+    try:
+        import subprocess
+        base = os.path.dirname(os.path.abspath(__file__))
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                                cwd=base, capture_output=True, text=True,
+                                timeout=5).stdout.strip()
+        subject = subprocess.run(["git", "log", "-1", "--format=%s"],
+                                 cwd=base, capture_output=True, text=True,
+                                 timeout=5).stdout.strip()
+    except Exception:
+        pass
+    ledger.append("Fable", "code_shipped", ref=f"v{APP_VERSION}",
+                  detail={"commit": commit, "subject": subject[:200]})
+    try:
+        os.makedirs(os.path.dirname(marker), mode=0o700, exist_ok=True)
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write(APP_VERSION)
+    except OSError:
+        pass
+
+
+_ledger_deploy_once()
+
+
 @app.get("/api/version")
 async def version():
     return {"version": APP_VERSION}

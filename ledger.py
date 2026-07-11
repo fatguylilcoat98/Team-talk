@@ -46,6 +46,7 @@ ACTIONS = {
     "workshop_shipped",
     "code_read",
     "night_started", "night_round", "night_halted", "night_report",
+    "code_shipped",
 }
 
 

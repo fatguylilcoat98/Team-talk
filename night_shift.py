@@ -269,13 +269,17 @@ async def run_round(participants: List[dict]) -> dict:
         }
         msg.update(_parse_stance(msg["text"]) if msg["ok"]
                    else {"stance": "error", "stance_note": ""})
-        # Run #1's confirmed inversion: a reply cut off by its token cap
-        # loses its STANCE line and was scored "silent" — which counted
-        # toward convergence. A truncated DISSENT read as agreement is
-        # exactly what this bench exists to catch. If the reply spent its
-        # whole budget and has no stance, score it truncated: it blocks
-        # convergence instead of feeding it.
-        if msg["ok"] and msg["stance"] == "silent" and msg["tokens"] >= cap:
+        # Muse's rule (v6 round, closing Claude's quoted-stance edge): a
+        # reply that spent its FULL token cap is truncated, so it has no
+        # authored stance — even if a stance-shaped line survived the cut
+        # (it may be a quote of another seat, misread by last-stance-wins).
+        # Discard whatever parsed, keep it in the record for audit, and
+        # score the reply truncated: it blocks convergence, never feeds it.
+        # Worst case is a genuinely-finished-at-the-cap dissent downgraded
+        # to truncated — which still blocks the halt, so the error is safe.
+        if msg["ok"] and msg["tokens"] >= cap:
+            if msg["stance"] != "silent":
+                msg["discarded_stance"] = msg["stance"]
             msg["stance"] = "truncated"
         rnd["messages"].append(msg)
         run["spent_tokens"] += msg["tokens"]
