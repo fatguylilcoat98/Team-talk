@@ -37,6 +37,7 @@
             <button data-area="wall" title="The Wall — sticky notes and red string">&#129535; The Wall</button>
             <button data-area="desks" title="Participant desks — journals, About Me, mail">&#129681; Desks</button>
             <button data-area="history" title="Room History — the museum of milestones">&#128220; History</button>
+            <button data-area="train" title="The Train — witnessed co-op storytelling with an AI Game Master">&#128642; Train</button>
         </nav>
 
         <div id="area-foyer" class="room-area hidden">
@@ -91,6 +92,37 @@
             <div id="history-pending"></div>
             <div id="history-timeline" class="history-timeline"></div>
             <p class="field-note">Append-only, forever. Originals are never rewritten — corrections attach beneath. AIs recommend entries; only you publish.</p>
+        </div>
+
+        <div id="area-train" class="room-area hidden">
+            <div class="train-tools">
+                <select id="game-select"><option value="">— pick a game —</option></select>
+                <button id="game-new-toggle">+ New Game</button>
+            </div>
+            <div id="game-create" class="game-create hidden">
+                <input type="text" id="game-title" maxlength="120" placeholder="Game title — e.g. The 8:14 to Bakersfield">
+                <div class="game-create-row">
+                    <input type="text" id="game-p1" maxlength="40" value="Chris" placeholder="Player 1">
+                    <input type="text" id="game-p2" maxlength="40" placeholder="Player 2 (optional)">
+                    <select id="game-gm"></select>
+                </div>
+                <button id="game-create-btn" class="primary">Start Game</button>
+                <p class="field-note">Two seats, one AI Game Master. Every world fact the GM establishes is registered in canon with an id — cited when reused, flagged red if a citation is invented, retconned only by you, visibly.</p>
+            </div>
+            <div id="game-view" class="hidden">
+                <div class="game-head">
+                    <div>
+                        <span id="game-view-title"></span>
+                        <span id="game-view-meta" class="field-note"></span>
+                    </div>
+                    <button id="game-canon-toggle" title="The world record — every established fact">&#128220; Canon <span id="game-canon-count"></span></button>
+                </div>
+                <div id="game-canon" class="game-canon hidden"></div>
+                <div id="game-feed" class="game-feed"></div>
+                <div id="game-moves"></div>
+                <button id="game-turn-btn" class="primary game-turn-btn">&#127922; Play the turn</button>
+            </div>
+            <p class="field-note" id="train-hint">The game Chris wanted on the Sacramento&rarr;Bakersfield train — rebuilt with the room's rules. Fiction requires invention; only <em>unregistered</em> invention is the enemy.</p>
         </div>
 
         <div id="area-living" class="room-area">

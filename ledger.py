@@ -39,6 +39,8 @@ ACTIONS = {
     "about_me_written", "room_context_changed",
     "history_recommended", "history_published", "history_rejected",
     "history_corrected",
+    "game_created", "game_turn_played", "game_fact_created",
+    "game_fact_cited_invalid", "game_retcon",
 }
 
 

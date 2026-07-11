@@ -1531,7 +1531,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1546,6 +1546,7 @@ function showArea(area) {
     if (area === 'wall') renderWall();
     if (area === 'desks') renderDeskChips();
     if (area === 'history') renderHistory();
+    if (area === 'train') renderTrain();
 }
 
 roomNav.addEventListener('click', (e) => {
@@ -2009,6 +2010,200 @@ document.getElementById('history-publish').addEventListener('click', async () =>
     document.getElementById('history-body').value = '';
     document.getElementById('history-add').classList.add('hidden');
     renderHistory();
+});
+
+// --- 🚂 The Train — witnessed co-op storytelling -----------------------------
+
+const gameSelect = document.getElementById('game-select');
+const gameView = document.getElementById('game-view');
+const gameFeed = document.getElementById('game-feed');
+const gameCanon = document.getElementById('game-canon');
+let currentGame = null;      // full game object from the server
+
+async function renderTrain() {
+    try {
+        const res = await fetch('/api/games');
+        const { games } = await res.json();
+        const keep = gameSelect.value;
+        gameSelect.innerHTML = '<option value="">— pick a game —</option>';
+        for (const g of games) {
+            const opt = document.createElement('option');
+            opt.value = g.id;
+            opt.textContent = `${g.title} · ${g.players.join(' & ')} · GM ${g.gm} · ${g.turns} turns`;
+            gameSelect.appendChild(opt);
+        }
+        const gmSel = document.getElementById('game-gm');
+        gmSel.innerHTML = '';
+        for (const p of participantsCache) {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = `GM: ${p.name}`;
+            gmSel.appendChild(opt);
+        }
+        if (keep && games.some((g) => g.id === keep)) {
+            gameSelect.value = keep;
+        } else if (!currentGame && games.length) {
+            gameSelect.value = games[0].id;
+        }
+        if (gameSelect.value) await openGame(gameSelect.value);
+        else gameView.classList.add('hidden');
+    } catch (err) { /* train stays parked if the server is away */ }
+}
+
+async function openGame(gameId) {
+    const res = await fetch(`/api/games/${encodeURIComponent(gameId)}`);
+    if (!res.ok) return;
+    currentGame = await res.json();
+    gameView.classList.remove('hidden');
+    document.getElementById('game-create').classList.add('hidden');
+    renderGame();
+}
+
+function renderGame() {
+    const g = currentGame;
+    if (!g) return;
+    document.getElementById('game-view-title').textContent = g.title;
+    document.getElementById('game-view-meta').textContent =
+        ` ${g.players.map((p) => p.name).join(' & ')} · GM: ${g.gm.name}`;
+    renderCanon();
+    gameFeed.innerHTML = '';
+    if (!g.turns.length) {
+        gameFeed.innerHTML = '<p class="empty-hint">Nothing yet — say what kind of story you two want, then play the turn. The GM offers options if you leave it open.</p>';
+    }
+    for (const t of g.turns) {
+        const card = document.createElement('div');
+        card.className = 'game-turn';
+        let html = `<div class="game-turn-n">Turn ${t.n}</div>`;
+        for (const [player, mv] of Object.entries(t.moves || {})) {
+            html += `<div class="game-move"><strong>${escapeText(player)}:</strong> ${escapeText(mv.text)}</div>`;
+        }
+        html += `<div class="game-narration">${citeLinks(escapeText(t.narration))}</div>`;
+        if ((t.facts_created || []).length) {
+            html += `<div class="game-facts-new">📖 registered: ${t.facts_created.map((f) => `<code>${escapeText(f)}</code>`).join(' ')}</div>`;
+        }
+        for (const flag of t.flags || []) {
+            html += `<div class="game-flag">✗ ${escapeText(flag)}</div>`;
+        }
+        card.innerHTML = html;
+        gameFeed.appendChild(card);
+    }
+    gameFeed.scrollTop = gameFeed.scrollHeight;
+
+    const movesDiv = document.getElementById('game-moves');
+    movesDiv.innerHTML = '';
+    for (const p of g.players) {
+        const queued = g.pending && g.pending[p.name];
+        const row = document.createElement('div');
+        row.className = 'game-move-row';
+        row.innerHTML = `<label>${escapeText(p.name)}</label>`
+            + `<textarea maxlength="2000" rows="2" data-player="${escapeText(p.name)}"
+                 placeholder="${queued ? 'move queued ✓ — type to replace it' : `what does ${escapeText(p.name)} do?`}"></textarea>`;
+        movesDiv.appendChild(row);
+    }
+}
+
+function citeLinks(html) {
+    // [f_ab12cd34ef] → clickable canon chip (canon ids are hex, escape-safe)
+    return html.replace(/\[(f_[0-9a-f]{6,16})\]/g,
+        '<button class="cite-chip" data-fact="$1">$1</button>');
+}
+
+function renderCanon() {
+    const facts = (currentGame && currentGame.facts) || [];
+    const live = facts.filter((f) => f.status === 'canon').length;
+    document.getElementById('game-canon-count').textContent = `(${live})`;
+    gameCanon.innerHTML = facts.length
+        ? '' : '<p class="empty-hint">Canon is empty — the world begins when the GM registers its first fact.</p>';
+    for (const f of [...facts].reverse()) {
+        const row = document.createElement('div');
+        row.className = `canon-fact${f.status !== 'canon' ? ' canon-void' : ''}`;
+        row.id = `canon-${f.id}`;
+        let html = `<code>${escapeText(f.id)}</code> <span class="canon-text">${escapeText(f.text)}</span>`
+            + `<span class="canon-meta">turn ${f.turn}</span>`;
+        if (f.status !== 'canon') {
+            const r = f.retcon || {};
+            html += `<div class="canon-retcon">⚰ voided by ${escapeText(r.by || '?')} — ${escapeText(r.reason || '')}${r.replaced_by ? ` → <code>${escapeText(r.replaced_by)}</code>` : ''}</div>`;
+        } else {
+            html += `<button class="canon-retcon-btn" data-fact="${escapeText(f.id)}" title="Void this fact — visibly, with a reason on the record">retcon</button>`;
+        }
+        row.innerHTML = html;
+        gameCanon.appendChild(row);
+    }
+}
+
+document.getElementById('game-new-toggle').addEventListener('click', () =>
+    document.getElementById('game-create').classList.toggle('hidden'));
+
+document.getElementById('game-create-btn').addEventListener('click', async () => {
+    const title = document.getElementById('game-title').value.trim();
+    const players = [document.getElementById('game-p1').value.trim(),
+                     document.getElementById('game-p2').value.trim()].filter(Boolean);
+    const gmId = document.getElementById('game-gm').value;
+    if (!title || !players.length || !gmId) return;
+    const res = await fetch('/api/games', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, players, gm_id: gmId }),
+    });
+    if (!res.ok) { alert((await res.json()).detail || 'Could not start the game'); return; }
+    currentGame = await res.json();
+    document.getElementById('game-title').value = '';
+    await renderTrain();
+    gameSelect.value = currentGame.id;
+    await openGame(currentGame.id);
+});
+
+gameSelect.addEventListener('change', () => {
+    if (gameSelect.value) openGame(gameSelect.value);
+});
+
+document.getElementById('game-canon-toggle').addEventListener('click', () =>
+    gameCanon.classList.toggle('hidden'));
+
+document.getElementById('area-train').addEventListener('click', async (e) => {
+    const chip = e.target.closest('.cite-chip');
+    if (chip) {
+        gameCanon.classList.remove('hidden');
+        const row = document.getElementById(`canon-${chip.dataset.fact}`);
+        if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('canon-hit');
+                   setTimeout(() => row.classList.remove('canon-hit'), 1600); }
+        return;
+    }
+    const retconBtn = e.target.closest('.canon-retcon-btn');
+    if (retconBtn && currentGame) {
+        const reason = prompt('Retcon reason — this goes on the record:');
+        if (!reason || !reason.trim()) return;
+        const replacement = prompt('Replacement fact (optional — blank just voids it):') || '';
+        const res = await fetch(`/api/games/${currentGame.id}/retcon`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fact_id: retconBtn.dataset.fact, reason, replacement }),
+        });
+        if (!res.ok) alert((await res.json()).detail || 'Retcon failed');
+        await openGame(currentGame.id);
+    }
+});
+
+document.getElementById('game-turn-btn').addEventListener('click', async () => {
+    if (!currentGame) return;
+    const btn = document.getElementById('game-turn-btn');
+    // queue whatever's typed in the move boxes first
+    for (const ta of document.querySelectorAll('#game-moves textarea')) {
+        if (ta.value.trim()) {
+            await fetch(`/api/games/${currentGame.id}/move`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ player: ta.dataset.player, text: ta.value.trim() }),
+            });
+        }
+    }
+    btn.disabled = true;
+    btn.textContent = '🎲 The GM is thinking…';
+    try {
+        const res = await fetch(`/api/games/${currentGame.id}/turn`, { method: 'POST' });
+        if (!res.ok) alert((await res.json()).detail || 'The GM could not play the turn');
+        await openGame(currentGame.id);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🎲 Play the turn';
+    }
 });
 
 showArea(localStorage.getItem('teamtalk-area') || 'living');
