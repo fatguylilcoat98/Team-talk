@@ -209,6 +209,10 @@ def sanitize_participants(incoming: List[dict]) -> List[dict]:
         elif existing_by_id.get(pid, {}).get("api_key"):
             clean["api_key"] = existing_by_id[pid]["api_key"]
         clean["color"] = p.get("color") or existing_by_id.get(pid, {}).get("color") or PALETTE[i % len(PALETTE)]
+        # Resting: seat stays configured (key kept, desk intact) but isn't
+        # called — for empty credit balances and broken provider consoles.
+        if p.get("resting"):
+            clean["resting"] = True
         roster.append(clean)
     return roster
 
