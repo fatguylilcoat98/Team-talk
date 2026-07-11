@@ -42,7 +42,11 @@ DEFAULT_BUDGET = 40_000            # output tokens across the whole run
 MIN_BUDGET, MAX_BUDGET = 5_000, 200_000
 REPLY_TOKENS = int(os.getenv("NIGHT_REPLY_TOKENS", "1200"))
 REPORT_TOKENS = int(os.getenv("NIGHT_REPORT_TOKENS", "2500"))
-MAX_TOPIC = 2000
+# The night bench is MEMORYLESS: seats get the night system prompt plus
+# this topic text — no boot packets, no chat history, no Workshop state.
+# The topic must CARRY everything the run needs (paste the spec in), so
+# it gets room to be a real briefing, not a headline.
+MAX_TOPIC = 12000
 TAIL_MESSAGES = 8                  # full text kept in context; older = stance log
 
 STANCE_RE = re.compile(r"^\s*STANCE:\s*(DISSENT|CONVERGED)\b[\s—:–-]*(.*)$",
@@ -173,6 +177,10 @@ when it's true. A missing stance line is logged as silence.
 
 RULES
 - No markers here (no MEMORY:/JOURNAL:/PIN: etc). The night bench is not the room.
+- The night bench is MEMORYLESS: you have no chat history, no boot packet, no \
+Wall here. Chris's briefing below and this run's transcript are your entire world. \
+Never claim to remember something from the room — if the briefing doesn't say it \
+and no seat established it this run, it's [unverified].
 - Be brief. Chris pays for every token and he is asleep. Say the new thing or converge.
 - Do not invent what other seats said, and do not soften what they got wrong."""
     if persona:
