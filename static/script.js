@@ -1576,7 +1576,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1593,6 +1593,7 @@ function showArea(area) {
     if (area === 'history') renderHistory();
     if (area === 'train') renderTrain();
     if (area === 'workshop') renderWorkshop();
+    if (area === 'night') renderNight();
 }
 
 roomNav.addEventListener('click', (e) => {
@@ -2426,6 +2427,150 @@ async function checkServerVersion() {
         // network hiccup — don't nag
     }
 }
+
+// --- 🌙 Night Shift --------------------------------------------------------
+
+let nightPollTimer = null;
+
+const STANCE_BADGES = {
+    dissent: '⚔ DISSENT', converged: '🤝 converged',
+    silent: '… silent', error: '✗ error',
+};
+
+async function renderNight() {
+    clearTimeout(nightPollTimer);
+    let data;
+    try {
+        data = await (await fetch('/api/night')).json();
+    } catch (err) {
+        return;
+    }
+    const run = data.run;
+    const statusBox = document.getElementById('night-status');
+    const formBox = document.getElementById('night-form');
+    const running = run && run.status === 'running';
+
+    formBox.classList.toggle('hidden', !!running);
+    statusBox.classList.toggle('hidden', !run);
+    document.getElementById('night-stop-btn').classList.toggle('hidden', !running);
+
+    if (run) {
+        document.getElementById('night-topic-view').textContent = run.topic;
+        const spent = (run.spent_tokens / 1000).toFixed(1);
+        const budget = Math.round(run.budget_tokens / 1000);
+        document.getElementById('night-meta').textContent =
+            `${running ? '🌙 running' : `halted: ${run.halt_reason || '?'}`}` +
+            ` · round ${run.rounds.length}/${run.max_rounds}` +
+            ` · ${spent}k/${budget}k tokens · ${run.dissent_total} dissent${run.dissent_total === 1 ? '' : 's'}`;
+
+        const reportBox = document.getElementById('night-report');
+        if (run.report) {
+            reportBox.classList.remove('hidden');
+            reportBox.innerHTML =
+                `<div class="night-report-head">📋 THE REPORT — written by ${escapeText(run.reporter)}</div>` +
+                `<div class="night-report-body">${escapeText(run.report)}</div>`;
+        } else {
+            reportBox.classList.add('hidden');
+        }
+
+        const feed = document.getElementById('night-feed');
+        feed.innerHTML = '';
+        for (const r of run.rounds) {
+            const marker = document.createElement('div');
+            marker.className = 'field-note';
+            marker.textContent = `— round ${r.n}${r.dissent_round ? ' · MANDATORY DISSENT ROUND' : ''} —`;
+            feed.appendChild(marker);
+            for (const m of r.messages) {
+                const item = document.createElement('div');
+                item.className = 'memory-item';
+                item.innerHTML =
+                    `<div class="memory-text"><strong style="color:${escapeText(m.color)}">${escapeText(m.name)}</strong>` +
+                    ` <span class="night-stance">${STANCE_BADGES[m.stance] || m.stance}${m.stance_note ? ' — ' + escapeText(m.stance_note) : ''}</span>` +
+                    `<div class="night-msg">${escapeText(m.text)}</div></div>`;
+                feed.appendChild(item);
+            }
+        }
+    }
+
+    const runsBox = document.getElementById('night-runs');
+    runsBox.innerHTML = (data.runs || []).length ? '' :
+        '<p class="field-note">No shifts yet — post a topic and walk away.</p>';
+    for (const r of data.runs || []) {
+        const item = document.createElement('div');
+        item.className = 'memory-item';
+        item.innerHTML =
+            `<div class="memory-text">${escapeText(r.topic)}` +
+            `<div class="memory-meta">${(r.started_at || '').slice(0, 16).replace('T', ' ')}` +
+            ` · ${r.rounds} rounds · ${(r.spent_tokens / 1000).toFixed(1)}k tokens` +
+            ` · ${escapeText(r.halt_reason || '')}${r.reporter ? ' · report by ' + escapeText(r.reporter) : ''}</div></div>`;
+        const view = document.createElement('button');
+        view.textContent = 'view';
+        view.addEventListener('click', async () => {
+            const full = await (await fetch(`/api/night/runs/${encodeURIComponent(r.id)}`)).json();
+            // Render the archived run in the status panel without touching the live state
+            document.getElementById('night-status').classList.remove('hidden');
+            document.getElementById('night-topic-view').textContent = full.topic;
+            document.getElementById('night-meta').textContent =
+                `archived · ${full.rounds.length} rounds · halted: ${full.halt_reason || '?'}`;
+            const reportBox = document.getElementById('night-report');
+            reportBox.classList.toggle('hidden', !full.report);
+            if (full.report) {
+                reportBox.innerHTML =
+                    `<div class="night-report-head">📋 THE REPORT — written by ${escapeText(full.reporter)}</div>` +
+                    `<div class="night-report-body">${escapeText(full.report)}</div>`;
+            }
+            const feed = document.getElementById('night-feed');
+            feed.innerHTML = '';
+            for (const rd of full.rounds) {
+                for (const m of rd.messages) {
+                    const it = document.createElement('div');
+                    it.className = 'memory-item';
+                    it.innerHTML =
+                        `<div class="memory-text"><strong style="color:${escapeText(m.color)}">${escapeText(m.name)}</strong>` +
+                        ` <span class="night-stance">${STANCE_BADGES[m.stance] || m.stance}</span>` +
+                        `<div class="night-msg">${escapeText(m.text)}</div></div>`;
+                    feed.appendChild(it);
+                }
+            }
+        });
+        item.appendChild(view);
+        runsBox.appendChild(item);
+    }
+
+    if (running && !document.getElementById('area-night').classList.contains('hidden')) {
+        nightPollTimer = setTimeout(renderNight, 10000);
+    }
+}
+
+document.getElementById('night-start-btn').addEventListener('click', async () => {
+    const topic = document.getElementById('night-topic').value.trim();
+    if (!topic) { alert('The shift needs a topic.'); return; }
+    const budget = document.getElementById('night-budget').value;
+    if (!confirm(`Start the Night Shift? Up to ${document.getElementById('night-rounds').value} rounds, ` +
+                 `hard-capped at ${Math.round(budget / 1000)}k output tokens. ` +
+                 `This spends API credits while you're away.`)) return;
+    const res = await fetch('/api/night/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            topic,
+            max_rounds: parseInt(document.getElementById('night-rounds').value, 10),
+            budget_tokens: parseInt(budget, 10),
+        }),
+    });
+    if (!res.ok) {
+        alert((await res.json()).detail || 'Could not start the shift.');
+        return;
+    }
+    document.getElementById('night-topic').value = '';
+    renderNight();
+});
+
+document.getElementById('night-stop-btn').addEventListener('click', async () => {
+    if (!confirm('Stop the shift? It will halt before its next round and still write its report.')) return;
+    await fetch('/api/night/stop', { method: 'POST' });
+    renderNight();
+});
 
 // --- Init ----------------------------------------------------------------
 

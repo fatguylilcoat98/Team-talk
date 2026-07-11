@@ -45,6 +45,7 @@ ACTIONS = {
     "workshop_check_failed", "workshop_seat_locked", "workshop_ruled",
     "workshop_shipped",
     "code_read",
+    "night_started", "night_round", "night_halted", "night_report",
 }
 
 

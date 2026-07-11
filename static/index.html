@@ -40,6 +40,7 @@
             <button data-area="history" title="Room History — the museum of milestones">&#128220; History</button>
             <button data-area="train" title="The Train — witnessed co-op storytelling with an AI Game Master">&#128642; Train</button>
             <button data-area="workshop" title="The Workshop — the gatekept bench where the AIs work between your messages">&#128296; Workshop</button>
+            <button data-area="night" title="Night Shift — the room works a topic while you're away, bounded and on the record">&#127769; Night Shift</button>
         </nav>
 
         <div id="area-foyer" class="room-area hidden">
@@ -161,6 +162,38 @@
                 <div id="ws-versions" class="memory-list"></div>
             </div>
             <p class="field-note">One target, one artifact, one judge. Edits land only if the check passes; a fail is reverted, receipted &#10007; REJECTED, and locks the seat for a cycle. Eloquence scores nothing here.</p>
+        </div>
+
+        <div id="area-night" class="room-area hidden">
+            <div id="night-form" class="game-create">
+                <textarea id="night-topic" maxlength="2000" rows="3" placeholder="The topic — what should the room work on while you're away?"></textarea>
+                <div class="game-create-row">
+                    <select id="night-rounds">
+                        <option value="4">4 rounds max</option>
+                        <option value="6" selected>6 rounds max</option>
+                        <option value="8">8 rounds max</option>
+                        <option value="12">12 rounds max</option>
+                    </select>
+                    <select id="night-budget">
+                        <option value="15000">15k token budget (light)</option>
+                        <option value="40000" selected>40k token budget (standard)</option>
+                        <option value="80000">80k token budget (deep)</option>
+                    </select>
+                    <button id="night-start-btn" class="primary">&#127769; Start the shift</button>
+                </div>
+            </div>
+            <div id="night-status" class="hidden">
+                <div class="night-head">
+                    <div id="night-topic-view"></div>
+                    <div id="night-meta" class="field-note"></div>
+                    <button id="night-stop-btn" class="danger hidden">&#9209; Stop the shift</button>
+                </div>
+                <div id="night-report" class="night-report hidden"></div>
+                <div id="night-feed" class="memory-list"></div>
+            </div>
+            <h3 class="nb-heading">Past shifts</h3>
+            <div id="night-runs" class="memory-list"></div>
+            <p class="field-note">Bounded by the room's own rules: a round cap, a hard token budget, an auto-halt when every seat converges — and consensus doesn't register until at least one dissent is on the record. You come back to a report; the digest is pinned to the Wall.</p>
         </div>
 
         <div id="area-living" class="room-area">

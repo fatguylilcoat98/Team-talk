@@ -39,6 +39,7 @@ import journal_store
 import ledger
 import mailbox_store
 import memory_store
+import night_shift
 import notebook_store
 import questions_store
 import receipt_store
@@ -55,6 +56,10 @@ from conversation import (SHORT_TERM_ROUNDS, blind_labels, build_context,
 LAN_WARNING = "Do not expose Team Talk publicly unless authentication is added."
 
 app = FastAPI(title="Team Talk")
+
+# A 🌙 run that says "running" after a restart is a ghost — no task behind
+# it. Close it honestly before anyone reads the state.
+night_shift.mark_stale()
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -1337,6 +1342,108 @@ async def get_workshop_version(v: int):
     if content is None:
         raise HTTPException(status_code=404, detail="Version not found")
     return {"v": v, "content": content}
+
+
+# --- 🌙 Night Shift -----------------------------------------------------------
+# Chris posts a topic and leaves; the room runs bounded AI-only rounds and
+# he comes back to a report, not a transcript. Stop conditions are the
+# room's own spec: round cap, token budget, all-converged halt, and one
+# mandatory dissent round before any consensus is allowed to register.
+
+class NightStart(BaseModel):
+    topic: str
+    max_rounds: int = night_shift.DEFAULT_ROUNDS
+    budget_tokens: int = night_shift.DEFAULT_BUDGET
+
+
+_night_running = asyncio.Lock()
+
+
+async def _night_shift_task() -> None:
+    """The whole shift, start to report. The lock makes runs sequential;
+    the state file (not this task) is the source of truth, so a stop
+    request or a restart is honored no matter who scheduled us."""
+    async with _night_running:
+        while True:
+            participants = [p for p in settings_store.get_participants()
+                            if not p.get("resting")]
+            step = await night_shift.run_round(participants)
+            if step.get("ran"):
+                ledger.append("Night Shift", "night_round", ref=f"r{step['round']}",
+                              detail={"stances": step.get("stances", {}),
+                                      "note": step.get("reason", "")})
+            if not step.get("halted"):
+                if not step.get("ran"):
+                    return   # no running run — nothing to do
+                continue
+            ledger.append("Night Shift", "night_halted", ref=step.get("reason", ""),
+                          detail={"rounds": step.get("round", 0)})
+            run = await night_shift.write_report(participants)
+            if run and run.get("report"):
+                ledger.append(run.get("reporter", "Night Shift"), "night_report",
+                              ref=run["id"],
+                              detail={"dissents": run.get("dissent_total", 0),
+                                      "spent_tokens": run.get("spent_tokens", 0),
+                                      "halt": run.get("halt_reason", "")})
+                digest = (f"🌙 NIGHT SHIFT REPORT — {run['topic'][:120]} · "
+                          f"{len(run['rounds'])} rounds, "
+                          f"{run.get('dissent_total', 0)} dissents, "
+                          f"halted: {run.get('halt_reason', '?')}. "
+                          f"Full report in 🌙 Night Shift.")
+                wall_store.create_note("Night Shift", digest, note_type="reference",
+                                       source=f"night:{run['id']}")
+                pid = _pid_for_name(run.get("reporter", ""))
+                if pid:
+                    receipt_store.issue(pid, "night_report", "success",
+                                        {"run": run["id"],
+                                         "rounds": len(run["rounds"]),
+                                         "dissents": run.get("dissent_total", 0)})
+            return
+
+
+@app.get("/api/night")
+async def get_night():
+    state = night_shift.load_state()
+    return {"run": state.get("run"), "runs": night_shift.list_runs(20),
+            "defaults": {"max_rounds": night_shift.DEFAULT_ROUNDS,
+                         "budget_tokens": night_shift.DEFAULT_BUDGET}}
+
+
+@app.post("/api/night/start")
+async def start_night(body: NightStart):
+    participants = [p for p in settings_store.get_participants()
+                    if not p.get("resting")]
+    if not participants:
+        raise HTTPException(status_code=400,
+                            detail="Every seat is resting — wake someone first")
+    run = night_shift.start_run(body.topic, body.max_rounds, body.budget_tokens)
+    if not run:
+        raise HTTPException(status_code=400,
+                            detail="A topic is required, and only one shift runs at a time")
+    ledger.append("Chris", "night_started", ref=run["id"],
+                  detail={"topic": run["topic"][:200],
+                          "max_rounds": run["max_rounds"],
+                          "budget_tokens": run["budget_tokens"],
+                          "seats": [p["name"] for p in participants]})
+    asyncio.create_task(_night_shift_task())
+    return run
+
+
+@app.post("/api/night/stop")
+async def stop_night():
+    """Chris pulls the plug — the run halts before its next round and
+    still writes its report from whatever it has."""
+    if not night_shift.request_stop():
+        raise HTTPException(status_code=404, detail="No shift is running")
+    return {"stopping": True}
+
+
+@app.get("/api/night/runs/{run_id}")
+async def get_night_run(run_id: str):
+    run = night_shift.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
 
 
 # --- 🎬 Director's Cut --------------------------------------------------------
