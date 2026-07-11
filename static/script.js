@@ -2434,7 +2434,7 @@ let nightPollTimer = null;
 
 const STANCE_BADGES = {
     dissent: '⚔ DISSENT', converged: '🤝 converged',
-    silent: '… silent', error: '✗ error',
+    silent: '… silent', truncated: '✂ truncated (cap hit)', error: '✗ error',
 };
 
 async function renderNight() {

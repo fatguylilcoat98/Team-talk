@@ -267,6 +267,14 @@ async def run_round(participants: List[dict]) -> dict:
         }
         msg.update(_parse_stance(msg["text"]) if msg["ok"]
                    else {"stance": "error", "stance_note": ""})
+        # Run #1's confirmed inversion: a reply cut off by its token cap
+        # loses its STANCE line and was scored "silent" — which counted
+        # toward convergence. A truncated DISSENT read as agreement is
+        # exactly what this bench exists to catch. If the reply spent its
+        # whole budget and has no stance, score it truncated: it blocks
+        # convergence instead of feeding it.
+        if msg["ok"] and msg["stance"] == "silent" and msg["tokens"] >= cap:
+            msg["stance"] = "truncated"
         rnd["messages"].append(msg)
         run["spent_tokens"] += msg["tokens"]
         if msg["stance"] == "dissent":
@@ -279,6 +287,8 @@ async def run_round(participants: List[dict]) -> dict:
         run["halt_reason"] = "every seat errored"
         report.update(halted=True, reason=run["halt_reason"])
     elif all(m["stance"] in ("converged", "silent") for m in live):
+        # "truncated" is deliberately NOT in this tuple — a seat that ran
+        # out of tokens mid-thought has not agreed with anyone.
         if run["dissent_total"] == 0 and not run["dissent_round_done"]:
             # Consensus without one logged dissent doesn't register — the
             # room's own rule. Order the attack round, then judge again.
