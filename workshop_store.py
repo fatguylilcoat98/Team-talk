@@ -150,10 +150,17 @@ def append_version(content: str, by: str, note: str = "",
                    check: Optional[dict] = None) -> dict:
     """Every submitted edit lands on the chain — including failed ones.
     A failed version's content is preserved but the live artifact stays
-    at the last passing version. The scar is permanent by design."""
+    at the last passing version. The scar is permanent by design.
+
+    Chain math MUST ignore verdict rows (Chris's manual rulings ride
+    outside the content chain with no hash): the room caught the bug
+    where a ruling row's empty hash became the next edit's prev_hash —
+    breaking the chain — and ruling an older version could even reuse
+    a version number and overwrite its file. Real versions only, here."""
     _ensure_dirs()
-    chain = _read_chain()
-    v = (chain[-1]["v"] + 1) if chain else 1
+    chain = [e for e in _read_chain()
+             if not e.get("verdict_for") and not e.get("_corrupt")]
+    v = (max(e.get("v", 0) for e in chain) + 1) if chain else 1
     prev = chain[-1]["hash"] if chain else GENESIS
     ts = _now()
     check = check or {"status": "pending", "output": ""}
