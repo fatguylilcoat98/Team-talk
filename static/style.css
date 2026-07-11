@@ -1726,3 +1726,80 @@ button.danger:hover {
     .game-feed { max-height: none; }
     .game-move-row label { min-width: 58px; font-size: 0.82rem; }
 }
+
+/* --- 🔨 The Workshop -------------------------------------------------------- */
+
+.ws-head { margin-bottom: 8px; }
+
+#ws-goal-view {
+    font-weight: 700;
+    color: var(--chris);
+}
+
+.ws-seats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0;
+}
+
+.ws-seat {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.82rem;
+}
+
+.ws-seat-locked {
+    color: var(--danger);
+    border-color: var(--danger) !important;
+    opacity: 0.85;
+}
+
+.ws-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 8px 0 4px;
+    flex-wrap: wrap;
+}
+
+.ws-artifact {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    max-height: 40vh;
+    overflow: auto;
+    font-size: 0.82rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ws-version .ws-view-btn,
+.ws-version .ws-rule-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    font-size: 0.72rem;
+    padding: 1px 7px;
+    cursor: pointer;
+    margin-left: 4px;
+}
+
+.ws-version .ws-rule-btn { color: #8fd3a8; border-color: #8fd3a8; }
+.ws-version .ws-rule-btn.danger { color: var(--danger); border-color: var(--danger); }
+
+#ws-goal, #ws-content, #ws-check {
+    width: 100%;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-family: inherit;
+    resize: vertical;
+}
+
+#ws-check { font-family: monospace; font-size: 0.8rem; }

@@ -1531,7 +1531,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1547,6 +1547,7 @@ function showArea(area) {
     if (area === 'desks') renderDeskChips();
     if (area === 'history') renderHistory();
     if (area === 'train') renderTrain();
+    if (area === 'workshop') renderWorkshop();
 }
 
 roomNav.addEventListener('click', (e) => {
@@ -2203,6 +2204,153 @@ document.getElementById('game-turn-btn').addEventListener('click', async () => {
     } finally {
         btn.disabled = false;
         btn.textContent = '🎲 Play the turn';
+    }
+});
+
+// --- 🔨 The Workshop ----------------------------------------------------------
+
+const WS_ACTION_BADGE = {
+    landed: ['✓ landed', 'ws-ok'], pending: ['⏳ awaiting ruling', 'ws-wait'],
+    rejected: ['✗ rejected · locked', 'ws-bad'], pass: ['— passed the turn', 'ws-dim'],
+    locked: ['🔒 locked out', 'ws-bad'], error: ['⚠ errored', 'ws-bad'],
+    malformed: ['✗ malformed · locked', 'ws-bad'],
+};
+let wsData = null;
+
+async function renderWorkshop() {
+    try {
+        const res = await fetch('/api/workshop');
+        wsData = await res.json();
+    } catch (err) { return; }
+    const active = wsData.target && wsData.target.status === 'active';
+    document.getElementById('ws-empty').classList.toggle('hidden', active);
+    document.getElementById('ws-active').classList.toggle('hidden', !active);
+    if (!active) {
+        if (wsData.target && wsData.target.status === 'shipped') {
+            document.getElementById('ws-empty').insertAdjacentHTML('afterbegin',
+                document.getElementById('ws-shipped-note') ? '' :
+                `<p class="field-note" id="ws-shipped-note">Last target shipped: “${escapeText(wsData.target.goal.slice(0, 120))}”</p>`);
+        }
+        return;
+    }
+    document.getElementById('ws-goal-view').textContent = wsData.target.goal;
+    document.getElementById('ws-meta').textContent =
+        `${wsData.target.filename} · judge: ${wsData.target.check_mode === 'script' ? 'check script' : 'Chris rules'}`
+        + ` · ${wsData.cycles} cycles · chain ${wsData.chain.valid ? 'valid ✓' : 'BROKEN ✗'}`;
+    document.getElementById('ws-auto').checked = !!wsData.auto_cycle;
+    document.getElementById('ws-live-v').textContent = wsData.live_version ? `— v${wsData.live_version}` : '';
+    document.getElementById('ws-live').textContent = wsData.live_content || '(empty)';
+
+    // seat lock badges
+    const seats = document.getElementById('ws-seats');
+    seats.innerHTML = '';
+    for (const p of participantsCache) {
+        const locked = (wsData.locks || {})[p.id] > 0;
+        const chip = document.createElement('span');
+        chip.className = `ws-seat${locked ? ' ws-seat-locked' : ''}`;
+        chip.textContent = `${locked ? '🔒 ' : ''}${p.name}`;
+        chip.style.borderColor = p.color || '#93a0b8';
+        seats.appendChild(chip);
+    }
+
+    const list = document.getElementById('ws-versions');
+    list.innerHTML = '';
+    const rulings = {};
+    for (const e of wsData.versions) {
+        if (e.verdict_for) rulings[e.verdict_for] = e.check;
+    }
+    for (const e of [...wsData.versions].reverse()) {
+        if (e.verdict_for) continue;
+        const status = (rulings[e.v] || e.check || {}).status || '?';
+        const row = document.createElement('div');
+        row.className = 'memory-item ws-version';
+        let badge = status === 'passed' || status === 'seed' ? '✓' : status === 'failed' ? '✗' : '⏳';
+        let html = `<strong>${badge} v${e.v}</strong> by ${escapeText(e.by)} — ${escapeText(e.note || '')}`
+            + ` <span class="canon-meta">${(e.ts || '').slice(5, 16).replace('T', ' ')}</span>`
+            + ` <button class="ws-view-btn" data-v="${e.v}">view</button>`;
+        if (status === 'failed' && (e.check || {}).output) {
+            html += `<div class="game-flag">${escapeText(e.check.output.slice(0, 300))}</div>`;
+        }
+        if (status === 'pending' && wsData.target.check_mode === 'manual') {
+            html += ` <button class="ws-rule-btn" data-v="${e.v}" data-s="passed">✓ pass</button>`
+                + ` <button class="ws-rule-btn danger" data-v="${e.v}" data-s="failed">✗ fail</button>`;
+        }
+        row.innerHTML = html;
+        list.appendChild(row);
+    }
+}
+
+document.getElementById('ws-new-toggle').addEventListener('click', () =>
+    document.getElementById('ws-create').classList.toggle('hidden'));
+
+document.getElementById('ws-check-mode').addEventListener('change', (e) =>
+    document.getElementById('ws-check').classList.toggle('hidden', e.target.value !== 'script'));
+
+document.getElementById('ws-open-btn').addEventListener('click', async () => {
+    const body = {
+        goal: document.getElementById('ws-goal').value.trim(),
+        filename: document.getElementById('ws-filename').value.trim() || 'artifact.txt',
+        content: document.getElementById('ws-content').value,
+        check_mode: document.getElementById('ws-check-mode').value,
+        check_script: document.getElementById('ws-check').value,
+    };
+    if (!body.goal) return;
+    const res = await fetch('/api/workshop/target', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) { alert((await res.json()).detail || 'Could not open the target'); return; }
+    renderWorkshop();
+});
+
+document.getElementById('ws-cycle-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('ws-cycle-btn');
+    btn.disabled = true;
+    btn.textContent = '🔨 The seats are at the bench…';
+    try {
+        const res = await fetch('/api/workshop/cycle', { method: 'POST' });
+        if (!res.ok) alert((await res.json()).detail || 'Cycle failed');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '▶ Run a work cycle';
+        renderWorkshop();
+    }
+});
+
+document.getElementById('ws-auto').addEventListener('change', async (e) => {
+    await fetch('/api/workshop/auto', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auto_cycle: e.target.checked }),
+    });
+});
+
+document.getElementById('ws-ship-btn').addEventListener('click', async () => {
+    if (!confirm('Ship it? The target closes and the final version goes on the record.')) return;
+    await fetch('/api/workshop/ship', { method: 'POST' });
+    renderWorkshop();
+});
+
+document.getElementById('area-workshop').addEventListener('click', async (e) => {
+    const view = e.target.closest('.ws-view-btn');
+    if (view) {
+        const res = await fetch(`/api/workshop/versions/${view.dataset.v}`);
+        if (res.ok) {
+            const { content } = await res.json();
+            document.getElementById('ws-live').textContent = content;
+            document.getElementById('ws-live-v').textContent = `— viewing v${view.dataset.v}`;
+        }
+        return;
+    }
+    const rule = e.target.closest('.ws-rule-btn');
+    if (rule) {
+        const reason = rule.dataset.s === 'failed'
+            ? (prompt('Why did it fail? Goes on the record:') || '') : '';
+        if (rule.dataset.s === 'failed' && !reason.trim()) return;
+        await fetch('/api/workshop/rule', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ version: Number(rule.dataset.v), status: rule.dataset.s, reason }),
+        });
+        renderWorkshop();
     }
 });
 

@@ -46,6 +46,8 @@ import session_manager
 import settings_store
 import splendor
 import wall_store
+import workshop_engine
+import workshop_store
 from conversation import (SHORT_TERM_ROUNDS, blind_labels, build_context,
                           normalize_modes, role_notes, system_prompt)
 
@@ -194,6 +196,7 @@ async def chat(request: ChatRequest):
                   wall_store.context_block(),
                   history_store.context_block(),
                   questions_store.context_block(),
+                  workshop_store.context_block(settings_store.get_participants()),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
             memory_block = f"{memory_block}\n\n{block}" if memory_block else block
@@ -408,7 +411,57 @@ async def chat(request: ChatRequest):
     # verbatim window get summarized so the next round can still see them.
     asyncio.create_task(_compress_session(session["id"], list(session["rounds"])))
 
+    # 🔨 The Workshop: the room asked to work between Chris's messages.
+    # After each round, if a target is active and auto-cycle is on, every
+    # unlocked seat gets a private bench turn in the background.
+    ws_state = workshop_store.load_state()
+    if (ws_state.get("auto_cycle", True)
+            and (ws_state.get("target") or {}).get("status") == "active"):
+        asyncio.create_task(_workshop_cycle_task())
+
     return {"session_id": session["id"], "status": status, **round_data}
+
+
+_workshop_cycle_running = asyncio.Lock()
+
+
+async def _workshop_cycle_task() -> dict:
+    """Run one work cycle and wire every outcome into the truth layer.
+    The lock keeps cycles sequential — overlapping cycles would race on
+    the version chain."""
+    async with _workshop_cycle_running:
+        participants = settings_store.get_participants()
+        report = await workshop_engine.run_cycle(participants)
+        if not report["ran"]:
+            return report
+        ledger.append("Workshop", "workshop_cycle", ref=f"cycle{report['cycle']}",
+                      detail={"turns": [{k: t.get(k) for k in ("name", "action", "version")}
+                                        for t in report["turns"]]})
+        for t in report["turns"]:
+            if t["action"] in ("landed", "pending"):
+                ledger.append(t["name"], "workshop_edit", ref=f"v{t.get('version')}",
+                              detail={"note": t.get("note", ""),
+                                      "check": (t.get("check") or {}).get("status")})
+                receipt_store.issue(t["seat"], "workshop_edit",
+                                    "success",
+                                    {"version": t.get("version"),
+                                     "check": (t.get("check") or {}).get("status"),
+                                     "note": t.get("note", "")[:100]})
+            elif t["action"] == "rejected":
+                ledger.append(t["name"], "workshop_check_failed", ref=f"v{t.get('version')}",
+                              detail={"output": (t.get("check") or {}).get("output", "")[:300]})
+                ledger.append(t["name"], "workshop_seat_locked", ref=t["seat"],
+                              detail={"cycles": workshop_store.LOCK_CYCLES})
+                receipt_store.issue(t["seat"], "workshop_edit", "rejected",
+                                    {"version": t.get("version"),
+                                     "reverted": True, "locked_next_cycle": True,
+                                     "check_output": (t.get("check") or {}).get("output", "")[:300]})
+            elif t["action"] == "malformed":
+                ledger.append(t["name"], "workshop_seat_locked", ref=t["seat"],
+                              detail={"reason": "malformed bench reply"})
+                receipt_store.issue(t["seat"], "workshop_edit", "rejected",
+                                    {"malformed": True, "locked_next_cycle": True})
+        return report
 
 
 async def _compress_session(session_id: str, rounds: List[dict]) -> None:
@@ -1133,6 +1186,124 @@ async def games_verify(game_id: str):
         raise HTTPException(status_code=404, detail="Game not found")
     return {"game_id": game_id, "canon": game_store.verify_canon(game),
             "facts": len(game["facts"])}
+
+
+# --- 🔨 The Workshop -----------------------------------------------------------
+
+class WorkshopTarget(BaseModel):
+    goal: str
+    filename: Optional[str] = "artifact.txt"
+    content: Optional[str] = ""
+    check_mode: Optional[str] = "manual"    # manual | script
+    check_script: Optional[str] = ""
+
+
+class WorkshopRuling(BaseModel):
+    version: int
+    status: str        # passed | failed
+    reason: Optional[str] = ""
+
+
+class WorkshopToggle(BaseModel):
+    auto_cycle: bool
+
+
+@app.get("/api/workshop")
+async def get_workshop():
+    state = workshop_store.load_state()
+    live = workshop_store.latest_passing()
+    return {
+        "target": state.get("target"),
+        "locks": state.get("locks", {}),
+        "cycles": state.get("cycles", 0),
+        "auto_cycle": state.get("auto_cycle", True),
+        "chain": workshop_store.verify_chain(),
+        "versions": workshop_store.list_versions(100),
+        "live_version": live["v"] if live else 0,
+        "live_content": workshop_store.read_version(live["v"]) if live else "",
+    }
+
+
+@app.post("/api/workshop/target")
+async def set_workshop_target(body: WorkshopTarget):
+    if body.check_mode == "script" and not (body.check_script or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="Script mode needs a check script — or pick manual judging")
+    target = workshop_store.set_target(body.goal, body.filename or "artifact.txt",
+                                       body.content or "", body.check_mode or "manual",
+                                       body.check_script or "")
+    if not target:
+        raise HTTPException(status_code=400, detail="A goal is required (and the seed must fit)")
+    ledger.append("Chris", "workshop_target_set", ref=target["filename"],
+                  detail={"goal": target["goal"][:200], "check_mode": target["check_mode"]})
+    return target
+
+
+@app.post("/api/workshop/cycle")
+async def run_workshop_cycle():
+    """Chris kicks a cycle by hand (auto-cycle also runs after each round)."""
+    report = await _workshop_cycle_task()
+    if not report["ran"]:
+        raise HTTPException(status_code=400, detail="No active target — open one first")
+    return report
+
+
+@app.post("/api/workshop/rule")
+async def rule_workshop_version(body: WorkshopRuling):
+    """Manual-judge mode: Chris rules on a pending version. A 'failed'
+    ruling locks the seat that wrote it, same as the script judge."""
+    if body.status not in ("passed", "failed"):
+        raise HTTPException(status_code=400, detail="Ruling must be passed or failed")
+    versions = workshop_store.list_versions(500)
+    entry = next((e for e in versions
+                  if e.get("v") == body.version and not e.get("verdict_for")), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Version not found")
+    workshop_store.update_check(body.version, body.status, body.reason or "ruled by Chris")
+    ledger.append("Chris", "workshop_ruled", ref=f"v{body.version}",
+                  detail={"status": body.status, "reason": (body.reason or "")[:200]})
+    pid = _pid_for_name(entry.get("by", ""))
+    if body.status == "failed" and pid:
+        state = workshop_store.load_state()
+        workshop_store.lock_seat(state, pid)
+        workshop_store.save_state(state)
+        ledger.append(entry.get("by", "?"), "workshop_seat_locked", ref=pid,
+                      detail={"reason": "ruled failed by Chris"})
+        receipt_store.issue(pid, "workshop_edit", "rejected",
+                            {"version": body.version, "ruled_by": "Chris",
+                             "reason": (body.reason or "")[:200], "locked_next_cycle": True})
+    elif pid:
+        receipt_store.issue(pid, "workshop_edit", "success",
+                            {"version": body.version, "ruled_by": "Chris"})
+    return {"version": body.version, "status": body.status}
+
+
+@app.post("/api/workshop/ship")
+async def ship_workshop():
+    target = workshop_store.ship_target()
+    if not target:
+        raise HTTPException(status_code=404, detail="No active target to ship")
+    live = workshop_store.latest_passing()
+    ledger.append("Chris", "workshop_shipped", ref=target["filename"],
+                  detail={"goal": target["goal"][:200],
+                          "final_version": live["v"] if live else 0})
+    return {"target": target, "final_version": live["v"] if live else 0}
+
+
+@app.post("/api/workshop/auto")
+async def toggle_workshop_auto(body: WorkshopToggle):
+    state = workshop_store.load_state()
+    state["auto_cycle"] = bool(body.auto_cycle)
+    workshop_store.save_state(state)
+    return {"auto_cycle": state["auto_cycle"]}
+
+
+@app.get("/api/workshop/versions/{v}")
+async def get_workshop_version(v: int):
+    content = workshop_store.read_version(v)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return {"v": v, "content": content}
 
 
 # --- 🎬 Director's Cut --------------------------------------------------------

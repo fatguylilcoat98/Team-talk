@@ -41,6 +41,9 @@ ACTIONS = {
     "history_corrected",
     "game_created", "game_turn_played", "game_fact_created",
     "game_fact_cited_invalid", "game_retcon",
+    "workshop_target_set", "workshop_cycle", "workshop_edit",
+    "workshop_check_failed", "workshop_seat_locked", "workshop_ruled",
+    "workshop_shipped",
 }
 
 
