@@ -188,6 +188,25 @@ button.danger:hover {
     background: var(--border);
 }
 
+/* Long sessions fold their early rounds behind this one button */
+.show-earlier-btn {
+    align-self: center;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 999px;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    padding: 6px 18px;
+    cursor: pointer;
+}
+
+.show-earlier-btn:hover {
+    color: var(--text);
+    border-style: solid;
+}
+
 /* Chris: full-width gold block at the top of each round */
 .chris-row {
     display: flex;

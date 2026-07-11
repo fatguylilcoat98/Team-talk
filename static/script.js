@@ -41,8 +41,37 @@ async function loadSession(sessionId) {
     currentSessionId = data.session_id;
 
     historyDiv.innerHTML = '';
-    for (const round of data.rounds) {
-        appendRoundToHistory(round);
+    const rounds = data.rounds;
+    // Long sessions fold: only the last few rounds render open, the rest
+    // wait behind one button — the full record is a click (or a PDF) away.
+    const KEEP_OPEN = 3;
+    if (rounds.length > KEEP_OPEN + 1) {
+        const hiddenCount = rounds.length - KEEP_OPEN;
+        const folded = document.createElement('div');
+        folded.style.display = 'none';
+        for (const round of rounds.slice(0, hiddenCount)) {
+            folded.appendChild(buildRound(round));
+        }
+        const toggle = document.createElement('button');
+        toggle.className = 'show-earlier-btn';
+        const label = (open) =>
+            `${open ? '⬆ Hide' : '⬇ Show'} the ${hiddenCount} earlier round${hiddenCount === 1 ? '' : 's'}`;
+        toggle.textContent = label(false);
+        toggle.addEventListener('click', () => {
+            const opening = folded.style.display === 'none';
+            folded.style.display = opening ? '' : 'none';
+            toggle.textContent = label(opening);
+            if (!opening) toggle.scrollIntoView({ block: 'center' });
+        });
+        historyDiv.appendChild(toggle);
+        historyDiv.appendChild(folded);
+        for (const round of rounds.slice(hiddenCount)) {
+            historyDiv.appendChild(buildRound(round));
+        }
+    } else {
+        for (const round of rounds) {
+            appendRoundToHistory(round);
+        }
     }
     historyDiv.scrollTop = historyDiv.scrollHeight;
 }
@@ -83,6 +112,7 @@ async function downloadExport(format, ext) {
 
 exportBtn.addEventListener('click', () => downloadExport('markdown', 'md'));
 document.getElementById('share-btn').addEventListener('click', () => downloadExport('html', 'html'));
+document.getElementById('pdf-btn').addEventListener('click', () => downloadExport('pdf', 'pdf'));
 
 deleteBtn.addEventListener('click', async () => {
     if (!currentSessionId) {
