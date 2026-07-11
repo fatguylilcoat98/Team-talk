@@ -14,6 +14,8 @@ from typing import List, Optional
 
 import aiofiles
 
+import pdf_export
+
 SESSIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -214,6 +216,11 @@ def export_html(session: dict) -> str:
 </body>
 </html>
 """
+
+
+def export_pdf(session: dict) -> bytes:
+    """The conversation as a PDF file — the archive that outlives the app."""
+    return pdf_export.export_pdf(session, normalize_round, _mode_marker)
 
 
 def export_markdown(session: dict) -> str:

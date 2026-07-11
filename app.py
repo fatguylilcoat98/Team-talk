@@ -1398,6 +1398,12 @@ async def export_session(session_id: str, format: str = "markdown"):
             media_type="text/html",
             headers={"Content-Disposition": f'attachment; filename="{session_id}.html"'},
         )
+    if format == "pdf":
+        return Response(
+            content=session_manager.export_pdf(session),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{session_id}.pdf"'},
+        )
     return Response(
         content=session_manager.export_markdown(session),
         media_type="text/markdown",
