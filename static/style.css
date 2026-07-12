@@ -1917,14 +1917,3 @@ button.danger:hover {
     cursor: pointer;
     white-space: nowrap;
 }
-
-/* 🧱 The Glass — banner shown while answers are sealed from the seats. */
-.glass-banner {
-    margin: 8px 0 0;
-    padding: 8px 12px;
-    border-radius: 8px;
-    background: #2b2f3a;
-    color: #e9ecf3;
-    font-size: 13px;
-    border: 1px solid #444b5c;
-}
