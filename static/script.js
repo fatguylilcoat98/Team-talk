@@ -1631,7 +1631,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1649,6 +1649,7 @@ function showArea(area) {
     if (area === 'train') renderTrain();
     if (area === 'workshop') renderWorkshop();
     if (area === 'night') renderNight();
+    if (area === 'proposals') renderProposals();
 }
 
 roomNav.addEventListener('click', (e) => {
@@ -2633,6 +2634,83 @@ document.getElementById('night-stop-btn').addEventListener('click', async () => 
     await fetch('/api/night/stop', { method: 'POST' });
     renderNight();
 });
+
+// --- 📥 Proposals -----------------------------------------------------------
+
+const PROP_STATUS = {
+    open: '🟡 open — the room is debating', advanced: '🟢 advanced — Fable builds it',
+    shipped: '📦 shipped — seal opened', archived: '🪦 archived — seal opened',
+};
+
+async function ruleProposal(id, verdict) {
+    const labels = { advance: 'Advance this proposal (Fable builds it)?',
+                     archive: 'Archive this proposal? The seal OPENS and the author is revealed.',
+                     ship: 'Mark shipped? The seal OPENS and the author is revealed.' };
+    if (!confirm(labels[verdict])) return;
+    const res = await fetch(`/api/proposals/${encodeURIComponent(id)}/rule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verdict }),
+    });
+    if (!res.ok) alert((await res.json()).detail || 'Ruling failed.');
+    renderProposals();
+}
+
+async function renderProposals() {
+    let data;
+    try {
+        data = await (await fetch('/api/proposals')).json();
+    } catch (err) { return; }
+    const liveBox = document.getElementById('prop-live');
+    const liveP = (data.proposals || []).find((p) => p.status === 'open' || p.status === 'advanced');
+    liveBox.innerHTML = '';
+    if (liveP) {
+        const card = document.createElement('div');
+        card.className = 'night-report';
+        card.innerHTML =
+            `<div class="night-report-head">📥 ${PROP_STATUS[liveP.status]} · sealed commitment ${escapeText(liveP.commitment.slice(0, 16))}…</div>` +
+            `<div class="night-report-body">${escapeText(liveP.neutral)}</div>`;
+        const actions = document.createElement('div');
+        actions.className = 'ws-actions';
+        if (liveP.status === 'open') {
+            const adv = document.createElement('button');
+            adv.className = 'primary';
+            adv.textContent = '✓ Advance';
+            adv.addEventListener('click', () => ruleProposal(liveP.id, 'advance'));
+            actions.appendChild(adv);
+        }
+        if (liveP.status === 'advanced') {
+            const ship = document.createElement('button');
+            ship.className = 'primary';
+            ship.textContent = '📦 Shipped (open the seal)';
+            ship.addEventListener('click', () => ruleProposal(liveP.id, 'ship'));
+            actions.appendChild(ship);
+        }
+        const arc = document.createElement('button');
+        arc.className = 'danger';
+        arc.textContent = '🪦 Archive (open the seal)';
+        arc.addEventListener('click', () => ruleProposal(liveP.id, 'archive'));
+        actions.appendChild(arc);
+        card.appendChild(actions);
+        liveBox.appendChild(card);
+    } else {
+        liveBox.innerHTML = '<p class="empty-hint">No live proposal — the box is open. Any seat can drop a PROPOSAL: line in chat.</p>';
+    }
+    const hist = document.getElementById('prop-history');
+    const past = (data.proposals || []).filter((p) => p.revealed);
+    hist.innerHTML = past.length ? '' : '<p class="field-note">No opened seals yet.</p>';
+    for (const p of past) {
+        const item = document.createElement('div');
+        item.className = 'memory-item';
+        item.innerHTML =
+            `<div class="memory-text">${PROP_STATUS[p.status] || p.status} — proposed by <strong>${escapeText(p.author_name || '?')}</strong>` +
+            `<div class="night-msg">${escapeText(p.neutral)}</div>` +
+            `<details><summary class="field-note">the sealed original, verbatim</summary>` +
+            `<div class="night-msg">${escapeText(p.original || '')}</div></details>` +
+            `<div class="memory-meta">${(p.ts || '').slice(0, 16).replace('T', ' ')} · commitment ${escapeText((p.commitment || '').slice(0, 16))}… · seal opened ${(p.revealed_at || '').slice(0, 16).replace('T', ' ')}</div></div>`;
+        hist.appendChild(item);
+    }
+}
 
 // --- Init ----------------------------------------------------------------
 

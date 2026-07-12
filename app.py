@@ -8,6 +8,7 @@ and ai_only (the AIs talk to each other while Chris watches).
 """
 
 import asyncio
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -42,6 +43,7 @@ import mailbox_store
 import memory_store
 import night_shift
 import notebook_store
+import proposal_store
 import questions_store
 import receipt_store
 import room_actions
@@ -245,6 +247,7 @@ async def chat(request: ChatRequest):
                   history_store.context_block(),
                   questions_store.context_block(),
                   workshop_store.context_block(settings_store.get_participants()),
+                  proposal_store.context_block(),
                   code_access.index_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
@@ -311,6 +314,7 @@ async def chat(request: ChatRequest):
         text, _ = mailbox_store.extract(text, participants)
         text, _ = about_store.extract(text)
         text, _ = code_access.extract(text)
+        text, _ = proposal_store.extract(text)
         text = room_actions._ACTION_LINE.sub("", text).strip()
         return text
 
@@ -444,6 +448,35 @@ async def chat(request: ChatRequest):
                                          "reason": "not on the CODE INDEX"})
             if granted:
                 r["code_requested"] = granted
+        # 📥 PROPOSAL: sealed submission. The marker is stripped BEFORE the
+        # record — anonymity starts here. The ledger event carries only the
+        # commitment (never the author); the receipt goes to the seat
+        # privately. Splendor the clerk renders the neutral text the room
+        # will actually debate.
+        cleaned, submitted = proposal_store.extract(r["text"])
+        if submitted or cleaned != r["text"]:
+            r["text"] = cleaned
+            for original in submitted:
+                if proposal_store.live():
+                    receipt_store.issue(r["id"], "proposal_submit", "rejected",
+                                        {"reason": "a proposal is already live — one at a time"})
+                    continue
+                neutral = await splendor.clerk_render(original)
+                if not neutral:
+                    receipt_store.issue(r["id"], "proposal_submit", "rejected",
+                                        {"reason": "the clerk (Splendor) could not render it — resubmit next turn"})
+                    continue
+                prop = proposal_store.submit(r["id"], r["name"], original, neutral)
+                if prop:
+                    ledger.append("Proposals", "proposal_sealed", ref=prop["id"],
+                                  detail={"commitment": prop["commitment"]})
+                    receipt_store.issue(r["id"], "proposal_submit", "success",
+                                        {"proposal_id": prop["id"],
+                                         "commitment": prop["commitment"][:16],
+                                         "note": "sealed — the room sees only the clerk's rendering"})
+                else:
+                    receipt_store.issue(r["id"], "proposal_submit", "rejected",
+                                        {"reason": "a proposal is already live — one at a time"})
         cleaned, action_results = room_actions.extract_and_apply(
             r["text"], author, session["id"])
         if action_results or cleaned != r["text"]:
@@ -1495,6 +1528,43 @@ async def get_night_run(run_id: str):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+# --- 📥 Proposals -------------------------------------------------------------
+
+class ProposalRuling(BaseModel):
+    verdict: str    # advance | archive | ship
+
+
+@app.get("/api/proposals")
+async def get_proposals():
+    return {"proposals": proposal_store.list_public(),
+            "live": bool(proposal_store.live())}
+
+
+@app.post("/api/proposals/{proposal_id}/rule")
+async def rule_proposal(proposal_id: str, body: ProposalRuling):
+    """Chris's button. archive/ship open the seal: the author's name and
+    original words enter the record, and the day-one commitment is
+    verified in the open — commit-reveal, not trust."""
+    p = proposal_store.rule(proposal_id, body.verdict)
+    if not p:
+        raise HTTPException(status_code=400,
+                            detail="Invalid verdict for this proposal's state")
+    ledger.append("Chris", "proposal_ruled", ref=p["id"],
+                  detail={"verdict": body.verdict, "status": p["status"]})
+    if p.get("revealed") and p.get("revealed_at") == p.get("ruled_at"):
+        seal_held = proposal_store.verify_reveal(p)
+        ledger.append("Proposals", "proposal_revealed", ref=p["id"],
+                      detail={"author": p["sealed"]["author_name"],
+                              "salt": p["sealed"]["salt"],
+                              "original_sha256": hashlib.sha256(
+                                  p["sealed"]["original"].encode()).hexdigest(),
+                              "commitment_valid": seal_held})
+        receipt_store.issue(p["sealed"]["author_id"], "proposal_reveal", "success",
+                            {"proposal_id": p["id"], "status": p["status"],
+                             "seal_held": seal_held})
+    return proposal_store.public_view(p)
 
 
 # --- 🎬 Director's Cut --------------------------------------------------------

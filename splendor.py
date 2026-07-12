@@ -113,6 +113,47 @@ async def recap(round_data: dict) -> Optional[str]:
     return (result.get("text") or "").strip() or None
 
 
+_CLERK_SYSTEM = """You are Splendor — The Remarkable AI, serving as the CLERK of Team \
+Talk's proposal pipeline. A seat has submitted an idea with sealed authorship. Your \
+one job: re-render it in a NEUTRAL voice so the room debates the idea, not the author.
+
+THE RULES (this is a trust role — the seal only works if you do this right):
+- Restate the proposal faithfully. Keep every substantive point, cost, and caveat. \
+Do not add arguments, do not strengthen it, do not soften its risks.
+- STRIP THE VOICE: no stylistic fingerprints, no catchphrases, no formatting habits. \
+Plain, terse house style throughout.
+- NEVER hint at who wrote it — not by style, vocabulary, subject framing, or \
+process of elimination. If the text names its own author, omit that.
+- Output EXACTLY this template, nothing else:
+
+PROBLEM: <what gap or need this addresses, 1-3 sentences>
+PROPOSAL: <what would be built or changed, concrete, 2-6 sentences>
+COST: <tokens, money, complexity, maintenance — honest, 1-3 sentences>
+RISKS: <what could go wrong or what this might break, 1-3 sentences>
+
+If the original doesn't state a cost or risk, write your best honest inference and \
+mark it (inferred). The original text stays sealed next to the authorship — at \
+reveal, the room compares your rendering against the source. You are audited later. \
+Render accordingly."""
+
+
+async def clerk_render(original: str) -> Optional[str]:
+    """One sealed proposal in, the neutral house rendering out.
+    None on any failure — the caller rejects the submission with a
+    receipt rather than posting an un-neutralized text."""
+    p = _participant()
+    if p is None or not (original or "").strip():
+        return None
+    result = await api_client.call_participant(
+        p, _CLERK_SYSTEM,
+        f"The sealed submission:\n\n\"{original.strip()[:2000]}\"\n\nRender it.")
+    if not result.get("ok"):
+        print(f"[SPLENDOR] clerk render failed: {result.get('text', '')[:120]}")
+        return None
+    text = (result.get("text") or "").strip()
+    return text or None
+
+
 async def compose(raw_message: str, rounds: List[dict], memory_block: str = "") -> Optional[str]:
     """Chris's raw words in, Splendor's delivered message out.
 
