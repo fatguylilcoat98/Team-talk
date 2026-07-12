@@ -223,6 +223,11 @@ def export_pdf(session: dict) -> bytes:
     return pdf_export.export_pdf(session, normalize_round, _mode_marker)
 
 
+def export_pdf_bundle(sessions: List[dict]) -> bytes:
+    """Selected sessions (or all of them) as ONE archive PDF."""
+    return pdf_export.export_pdf_bundle(sessions, normalize_round, _mode_marker)
+
+
 def export_markdown(session: dict) -> str:
     lines = [
         f"# Team Talk — {session['id']}",

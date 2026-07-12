@@ -23,6 +23,7 @@
                 <button id="share-btn" title="Download a beautiful page of this conversation to share anywhere">&#128279; Share Page</button>
                 <button id="export-btn" title="Download conversation as Markdown">Export as Markdown</button>
                 <button id="pdf-btn" title="Download the conversation as a PDF file">&#128196; Export as PDF</button>
+                <button id="archive-btn" title="Pick sessions (or all of them) and download the whole record as one PDF">&#128218; Archive PDF</button>
                 <button id="delete-btn" class="danger" title="Delete this session">Delete Session</button>
                 <button id="memory-btn" title="What the AIs remember across sessions">&#129504; Memory</button>
                 <button id="notebook-btn" title="The room's shared scratchpad — raw notes and pinned quotes">&#128211; Notebook</button>
@@ -31,6 +32,15 @@
                 <button id="settings-btn" title="API keys and models">&#9881; Settings</button>
             </div>
         </header>
+
+        <div id="archive-panel" class="archive-panel hidden">
+            <div class="archive-head">
+                <label><input type="checkbox" id="archive-all" checked> all sessions</label>
+                <button id="archive-download" class="primary">&#128218; Download</button>
+                <button id="archive-close">✕</button>
+            </div>
+            <div id="archive-list" class="archive-list"></div>
+        </div>
 
         <nav class="room-nav" aria-label="Room areas">
             <button data-area="foyer" title="The Foyer — orientation board">&#127963; Foyer</button>
