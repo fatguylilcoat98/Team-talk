@@ -133,6 +133,8 @@ _MODE_TITLES = {
     "movie_cast": "🎬 Movie Cast", "mystery": "🕵️ Mystery",
     "courtroom": "⚖️ Courtroom", "late_night": "🎙️ Late Night Panel",
     "concrete": "🔨 Concrete", "hard_truth": "💊 Hard Truth", "blind": "🕶️ Blind",
+    "chain_auditor": "📜 Chain Auditor", "ledgers_dream": "🛌 Ledger's Dream",
+    "fridge_note": "🧲 Fridge Note", "object_theater": "🪨 Object Theater",
 }
 
 

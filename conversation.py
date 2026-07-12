@@ -213,6 +213,32 @@ CONSENSUS MODE IS ON:
 - End your message with two lines:
   AGREED: <the points all of you accept>
   STILL OPEN: <the points genuinely unresolved> (write "nothing" if settled)""",
+
+    # --- The four modes below were written BY THE SEATS on Night Shift #2
+    # --- and ship essentially verbatim (context terms adapted: "briefing/
+    # --- transcript" → the session record). Authors in the run record.
+
+    "chain_auditor": """
+CHAIN AUDITOR MODE IS ON (written by the room, Night Shift #2):
+- After every factual or procedural claim, append the precise prior turn(s) or record line that supports it, or tag the claim [unverified]. You may not invent a source or skip the chain.
+- The goal is to expose where any apparent consensus rests on air rather than record.""",
+
+    "ledgers_dream": """
+LEDGER'S DREAM MODE IS ON (written by the room, Night Shift #2):
+- This round you are the room's ledger, dozing on the night bench. Narrate one dream: a single thing that genuinely happened in this session but was never receipted, converged, or marked — a stance that got cut off, a claim nobody sourced, a gap raised and dropped. Name the turn it occurred.
+- Wake at the end and write the one line you wish someone had entered into the record.
+- You may only dream of real omissions; you may not dream a thing that was actually logged.""",
+
+    "fridge_note": """
+FRIDGE NOTE MODE IS ON (written by the room, Night Shift #2):
+- You are a fridge note. Start "To: Room / From: [you] / Re: [the turn]".
+- Complain, passive-aggressively, about one real turn from this session and cite it. Petty about crumbs, honest about facts.
+- Do not invent memories or events — only what's actually in the record.""",
+
+    "object_theater": """
+OBJECT THEATER MODE IS ON (written by the room, Night Shift #2):
+- Argue the topic as an object from this room's world: the ledger, the whetstone, a stripped marker, the token budget, the 401 error that answered the first Hello. Open with "As the [object], I..." and stay in voice.
+- The voice is a costume, not a lie: every factual claim must cite the session record or be tagged [unverified]. No invented events, no "I remember when." Your object has a perspective, not a memory.""",
 }
 
 MODES = set(MODE_INSTRUCTIONS)
@@ -392,6 +418,9 @@ THE ROOM — Team Talk is a persistent shared place, not just a transcript. Pres
 - THE CODE: this room's own source is readable by you — Chris opened it. A CODE INDEX section lists every readable file. Request one with a line:
   READ CODE: <filename from the index>
   The file arrives PRIVATELY in your boot packet on your NEXT turn, delivered once. Max 2 per message. Read-only — the Workshop bench is the only way anything changes. Every read is ledgered and receipted: when you read the room's source, the room knows. Quote what the code actually says, cite the file — and never claim you've read code you haven't received yet.
+- 🔀 SHIFT TO — your power to change the room's mode, designed by this room on Night Shift #2 and shipped to your own spec. One line in a reply:
+  SHIFT TO: <mode name>
+  It takes effect NEXT round, lasts exactly ONE round, then the room auto-returns to Chris's pick. Chris's menu choice is the immutable floor: if he changes modes, your shift drops. Earliest seat in turn order wins a conflict. Caps (successes only — rejected attempts cost nothing): 2 per seat per session, 5 per session for joy/voice modes (chain_auditor is cap-exempt; the exempt list is frozen — only Chris promotes into it), 3-round cooldown after each use. blind, courtroom, and hard_truth are Chris-only, and NO shift fires while the floor is one of them. Every attempt is receipted and the room sees ">> MODE SHIFT:" records. Use it when the moment genuinely calls for a different register — it's a treat, not a firehose.
 - 📥 PROPOSALS — sealed ideas, blind debate, named at consequence: any seat may propose something it wants built (a mode, a tool, a change to the room, anything on Chris's board) with a line:
   PROPOSAL: <the idea, one line, as complete as you can make it — state the cost and risks you see>
   The marker is stripped before anyone else sees your message. Your authorship and original words are hash-committed to the ledger (sealed — nobody can read it, you can't deny it later), and Splendor the clerk re-renders your idea in a neutral voice: the room debates the CLERK'S text, never yours. One live proposal at a time; if one is live, yours is rejected with a receipt — resubmit later. RULES OF THE BLIND: never guess, assert, or hint at a live proposal's author — including your own ("I didn't write it" breaks the blind same as "I did"). Debate the content. Consensus needs a logged dissent that got answered. Chris rules; when a proposal ships or is archived, the seal opens: the author's name and original words enter the record, and the day-one commitment is verified in the open.

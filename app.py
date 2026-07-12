@@ -41,6 +41,7 @@ import journal_store
 import ledger
 import mailbox_store
 import memory_store
+import mode_shift
 import night_shift
 import notebook_store
 import proposal_store
@@ -53,7 +54,7 @@ import splendor
 import wall_store
 import workshop_engine
 import workshop_store
-from conversation import (SHORT_TERM_ROUNDS, blind_labels, build_context,
+from conversation import (MODES, SHORT_TERM_ROUNDS, blind_labels, build_context,
                           normalize_modes, role_notes, system_prompt)
 
 LAN_WARNING = "Do not expose Team Talk publicly unless authentication is added."
@@ -194,6 +195,21 @@ async def chat(request: ChatRequest):
     history = session["rounds"]
     round_number = len(history) + 1
 
+    # 🔀 A seat's SHIFT TO from last round takes effect now — for exactly
+    # one round, unless Chris changed his mode pick (his floor wins).
+    shift_notices = []
+    chris_floor = list(modes)
+    prev_modes = (session_manager.normalize_round(history[-1]).get("modes")
+                  or []) if history else []
+    applied = mode_shift.apply_pending(session, modes, prev_modes, round_number)
+    if applied:
+        shift_notices.append(applied["record"])
+        ledger.append(applied["record"]["by"], "mode_shift",
+                      ref=applied["record"]["mode"],
+                      detail={k: applied["record"][k] for k in ("status", "reason", "round")})
+        if applied.get("modes"):
+            modes = normalize_modes(applied["modes"]) or modes
+
     # Attachments: images go to the APIs natively; text/PDF content is
     # inlined into the round's context
     att_metas = []
@@ -253,6 +269,9 @@ async def chat(request: ChatRequest):
         if block:
             memory_block = f"{memory_block}\n\n{block}" if memory_block else block
     episodes_block = episode_store.session_block(session["id"])
+    if shift_notices:
+        _shift_lines = "\n".join(mode_shift.record_line(x) for x in shift_notices)
+        memory_block = f"{_shift_lines}\n\n{memory_block}" if memory_block else _shift_lines
 
     # Canonical room context: one device-verified time & place for everyone.
     # A change of place (vs the previous round) is itself a ledgered event.
@@ -315,6 +334,7 @@ async def chat(request: ChatRequest):
         text, _ = about_store.extract(text)
         text, _ = code_access.extract(text)
         text, _ = proposal_store.extract(text)
+        text, _ = mode_shift.extract(text)
         text = room_actions._ACTION_LINE.sub("", text).strip()
         return text
 
@@ -477,6 +497,24 @@ async def chat(request: ChatRequest):
                 else:
                     receipt_store.issue(r["id"], "proposal_submit", "rejected",
                                         {"reason": "a proposal is already live — one at a time"})
+        # 🔀 SHIFT TO — the seats' own mode power (Night Shift #2 spec).
+        # Evaluated in response order = turn order, so earliest seat wins.
+        cleaned, shift_requests = mode_shift.extract(r["text"])
+        if shift_requests or cleaned != r["text"]:
+            r["text"] = cleaned
+            for req in shift_requests[:1]:
+                rec = mode_shift.attempt(session, r["id"], author, req,
+                                         chris_floor, round_number, MODES)
+                shift_notices.append(rec)
+                ledger.append(author, "mode_shift", ref=req,
+                              detail={"status": rec["status"],
+                                      "reason": rec["reason"],
+                                      "round": round_number})
+                receipt_store.issue(r["id"], "mode_shift",
+                                    "success" if rec["status"] == "SUCCESS" else "rejected",
+                                    {"mode": req, "reason": rec["reason"],
+                                     "takes_effect": (f"round {round_number + 1}, one round only"
+                                                      if rec["status"] == "SUCCESS" else "never")})
         cleaned, action_results = room_actions.extract_and_apply(
             r["text"], author, session["id"])
         if action_results or cleaned != r["text"]:
@@ -510,6 +548,7 @@ async def chat(request: ChatRequest):
         "attachments": [
             {"id": m["id"], "name": m["name"], "kind": m["kind"]} for m in att_metas
         ],
+        **({"mode_shifts": shift_notices} if shift_notices else {}),
         "responses": responses,
     }
 

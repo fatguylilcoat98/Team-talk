@@ -48,6 +48,7 @@ ACTIONS = {
     "night_started", "night_round", "night_halted", "night_report",
     "code_shipped",
     "proposal_sealed", "proposal_ruled", "proposal_revealed",
+    "mode_shift",
 }
 
 
