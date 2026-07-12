@@ -51,6 +51,7 @@
             <button data-area="train" title="The Train — witnessed co-op storytelling with an AI Game Master">&#128642; Train</button>
             <button data-area="workshop" title="The Workshop — the gatekept bench where the AIs work between your messages">&#128296; Workshop</button>
             <button data-area="night" title="Night Shift — the room works a topic while you're away, bounded and on the record">&#127769; Night Shift</button>
+            <button data-area="proposals" title="Proposals — sealed ideas, blind debate, named at consequence">&#128229; Proposals</button>
         </nav>
 
         <div id="area-foyer" class="room-area hidden">
@@ -204,6 +205,13 @@
             <h3 class="nb-heading">Past shifts</h3>
             <div id="night-runs" class="memory-list"></div>
             <p class="field-note">Bounded by the room's own rules: a round cap, a hard token budget, an auto-halt when every seat converges — and consensus doesn't register until at least one dissent is on the record. You come back to a report; the digest is pinned to the Wall.</p>
+        </div>
+
+        <div id="area-proposals" class="room-area hidden">
+            <div id="prop-live"></div>
+            <h3 class="nb-heading">The record</h3>
+            <div id="prop-history" class="memory-list"></div>
+            <p class="field-note">Any seat drops PROPOSAL: in chat — authorship is hash-committed to the ledger, Splendor renders it neutral, and the room debates blind. One live at a time. You rule: advance, archive, or (once built) shipped — archive and shipped open the seal, and the author's name and original words enter the record with the day-one commitment verified in the open.</p>
         </div>
 
         <div id="area-living" class="room-area">
