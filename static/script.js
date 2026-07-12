@@ -306,6 +306,10 @@ const MODE_LABELS = {
     courtroom: '⚖️ courtroom',
     late_night: '🎙️ late night',
     concrete: '🔨 concrete',
+    chain_auditor: '📜 chain auditor',
+    ledgers_dream: "🛌 ledger's dream",
+    fridge_note: '🧲 fridge note',
+    object_theater: '🪨 object theater',
 };
 
 // Modes stack: pick up to 3 at once (e.g. Hard Truth + Roast).
@@ -517,6 +521,9 @@ function buildRound(round, pending = false, reveal = false) {
         if (modeText) label += ` · ${modeText}`;
         if (round.turn_style === 'sequential') label += ' · 🔁';
         if ((round.responses || []).length > 2) label += ` · ${round.responses.length} AIs`;
+        for (const ms of round.mode_shifts || []) {
+            label += ` · 🔀 ${ms.by}→${ms.mode} ${ms.status === 'SUCCESS' ? '✓' : '✗ ' + ms.reason}`;
+        }
         marker.appendChild(document.createTextNode(label));
         if (isBlind) {
             const btn = document.createElement('button');
