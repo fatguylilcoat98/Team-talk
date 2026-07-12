@@ -114,6 +114,61 @@ exportBtn.addEventListener('click', () => downloadExport('markdown', 'md'));
 document.getElementById('share-btn').addEventListener('click', () => downloadExport('html', 'html'));
 document.getElementById('pdf-btn').addEventListener('click', () => downloadExport('pdf', 'pdf'));
 
+// --- 📚 Archive PDF: pick sessions (or all) → one combined PDF -------------
+
+const archivePanel = document.getElementById('archive-panel');
+
+document.getElementById('archive-btn').addEventListener('click', async () => {
+    if (!archivePanel.classList.contains('hidden')) {
+        archivePanel.classList.add('hidden');
+        return;
+    }
+    const data = await (await fetch('/api/sessions')).json();
+    const list = document.getElementById('archive-list');
+    list.innerHTML = data.sessions.length ? '' :
+        '<p class="field-note">No sessions on record yet.</p>';
+    for (const s of data.sessions) {
+        const row = document.createElement('label');
+        row.className = 'archive-row';
+        const preview = s.last_message ? ` — ${s.last_message.slice(0, 48)}` : '';
+        row.innerHTML =
+            `<input type="checkbox" class="archive-pick" value="${escapeText(s.id)}" checked> ` +
+            `${escapeText(s.id)} (${s.rounds} rounds)${escapeText(preview)}`;
+        list.appendChild(row);
+    }
+    document.getElementById('archive-all').checked = true;
+    archivePanel.classList.remove('hidden');
+});
+
+document.getElementById('archive-all').addEventListener('change', (e) => {
+    for (const box of document.querySelectorAll('.archive-pick')) {
+        box.checked = e.target.checked;
+    }
+});
+
+document.getElementById('archive-close').addEventListener('click', () =>
+    archivePanel.classList.add('hidden'));
+
+document.getElementById('archive-download').addEventListener('click', async () => {
+    const picked = [...document.querySelectorAll('.archive-pick:checked')].map((b) => b.value);
+    if (!picked.length) { alert('Pick at least one session.'); return; }
+    const all = picked.length === document.querySelectorAll('.archive-pick').length;
+    const res = await fetch('/api/sessions/export_bundle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: all ? [] : picked }),
+    });
+    if (!res.ok) { alert('Archive export failed.'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `team-talk-archive.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    archivePanel.classList.add('hidden');
+});
+
 deleteBtn.addEventListener('click', async () => {
     if (!currentSessionId) {
         alert('No active session to delete.');

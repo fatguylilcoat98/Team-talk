@@ -83,9 +83,48 @@ class _SessionPDF(FPDF):
 
 
 def export_pdf(session: dict, normalize_round, mode_marker) -> bytes:
-    """Render a session as PDF bytes. Layout mirrors the HTML export."""
+    """Render one session as PDF bytes. Layout mirrors the HTML export."""
+    pdf = _SessionPDF(str(session.get("id", "Team Talk")))
+    _render_session(pdf, session, normalize_round, mode_marker)
+    return bytes(pdf.output())
+
+
+def export_pdf_bundle(sessions: list, normalize_round, mode_marker) -> bytes:
+    """Many sessions, one archive PDF — Chris's ask: the whole room's
+    record in a single file that's easy to save, transfer, and show.
+    Cover page with the roll call, then each session from a fresh page."""
+    pdf = _SessionPDF("Team Talk archive")
+    pdf.add_page()
+    pdf.set_font(pdf.family, "B", 20)
+    pdf.set_text_color(*INK)
+    pdf.ln(30)
+    pdf.cell(0, 10, "Team Talk — The Record", align="C",
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font(pdf.family, "", 10)
+    pdf.set_text_color(*FAINT)
+    exported = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    total_rounds = sum(len(s.get("rounds", [])) for s in sessions)
+    pdf.cell(0, 6, pdf.clean(
+        f"{len(sessions)} session{'s' if len(sessions) != 1 else ''} · "
+        f"{total_rounds} rounds · exported {exported}"),
+        align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(8)
+    pdf.set_font(pdf.family, "", 9.5)
+    pdf.set_text_color(*INK)
+    for s in sessions:
+        first = (s.get("rounds") or [{}])[0].get("chris_message", "")
+        pdf.multi_cell(0, 5.5, pdf.clean(
+            f"•  {s.get('id', '?')}  ·  {str(s.get('created_at', ''))[:10]}  ·  "
+            f"{len(s.get('rounds', []))} rounds — {first[:80]}"),
+            new_x="LMARGIN", new_y="NEXT")
+    for s in sessions:
+        _render_session(pdf, s, normalize_round, mode_marker)
+    return bytes(pdf.output())
+
+
+def _render_session(pdf: _SessionPDF, session: dict, normalize_round,
+                    mode_marker) -> None:
     title = str(session.get("id", "Team Talk"))
-    pdf = _SessionPDF(title)
     pdf.add_page()
 
     pdf.set_font(pdf.family, "B", 16)
@@ -134,8 +173,6 @@ def export_pdf(session: dict, normalize_round, mode_marker) -> bytes:
             _speaker_block(pdf, shown.upper(), _hex_rgb(resp.get("color")),
                            resp.get("text", ""),
                            tokens=resp.get("tokens"))
-
-    return bytes(pdf.output())
 
 
 def _speaker_block(pdf: _SessionPDF, name: str, rgb, text: str, tokens=None):

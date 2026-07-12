@@ -1569,6 +1569,34 @@ async def export_session(session_id: str, format: str = "markdown"):
     )
 
 
+class BundleRequest(BaseModel):
+    ids: List[str] = []     # empty list = every session on record
+
+
+@app.post("/api/sessions/export_bundle")
+async def export_bundle(body: BundleRequest):
+    """Selected sessions — or all of them — as one archive PDF: the whole
+    room's record in a single file, easy to save, transfer, and show."""
+    summaries = await session_manager.list_sessions()
+    wanted = set(body.ids) if body.ids else {s["id"] for s in summaries}
+    sessions = []
+    for s in summaries:                      # list is newest-first
+        if s["id"] in wanted:
+            full = await session_manager.load_session(s["id"])
+            if full:
+                sessions.append(full)
+    if not sessions:
+        raise HTTPException(status_code=404, detail="No matching sessions to export")
+    sessions.sort(key=lambda s: s.get("created_at", ""))   # chronological read
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return Response(
+        content=session_manager.export_pdf_bundle(sessions),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="team-talk-archive-{stamp}.pdf"'},
+    )
+
+
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
     if not session_manager.delete_session(session_id):
