@@ -16,6 +16,8 @@ import json
 import os
 import re
 import uuid
+
+import ledger
 from datetime import datetime, timezone
 from typing import List, Tuple
 
@@ -52,8 +54,21 @@ def _load() -> dict:
     }
 
 
+def _ledger_evicted(items: list, cap: int, action: str) -> None:
+    """Record every live item the cap is about to drop — nothing vanishes
+    silently (the room's rule)."""
+    for e in items[:max(0, len(items) - cap)]:
+        if e.get("tombstone"):
+            continue
+        ledger.append(e.get("by") or "system", action, ref=e.get("id") or "",
+                      detail={"reason": f"aged out at the {cap} cap",
+                              "text": (e.get("text") or e.get("summary") or "")[:200]})
+
+
 def _save(data: dict) -> None:
     os.makedirs(NOTEBOOK_DIR, mode=0o700, exist_ok=True)
+    _ledger_evicted(data["entries"], MAX_ENTRIES, "notebook_entry_evicted")
+    _ledger_evicted(data["pins"], MAX_PINS, "pin_evicted")
     data = {
         "entries": data["entries"][-MAX_ENTRIES:],
         "pins": data["pins"][-MAX_PINS:],

@@ -14,6 +14,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Tuple
 
+import ledger
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MEMORY_DIR = os.path.join(BASE_DIR, "memory")
 MEMORY_PATH = os.path.join(MEMORY_DIR, "memory.json")
@@ -50,6 +52,27 @@ def list_memories() -> List[dict]:
     return _load()
 
 
+def _record_evictions(entries: List[dict]) -> None:
+    """Before the cap truncates the list, leave a ledger tombstone for every
+    entry it will drop — so nothing vanishes silently (the room's own rule).
+    The content already rode into the ledger at creation; this records that it
+    aged out of active memory, which was the hole in the glass box's floor."""
+    overflow = len(entries) - MAX_ENTRIES
+    for e in entries[:max(0, overflow)]:
+        already = e.get("tombstone")
+        ledger.append(
+            e.get("original_by") or e.get("by") or "system",
+            "memory_tombstone_evicted" if already else "memory_evicted",
+            ref=e.get("id") or "",
+            detail={
+                "reason": f"aged out at the {MAX_ENTRIES}-memory cap",
+                "text": (e.get("text") or "")[:200],
+                "kind": e.get("kind"),
+                "created_at": e.get("created_at") or e.get("original_created_at"),
+            },
+        )
+
+
 def add(text: str, by: str, kind: str = "ai_observed") -> dict:
     """kind: "chris_stated" (Chris said it directly — fact) or "ai_observed"
     (an AI's own interpretation — carries doubt). Provenance, Splendor-style."""
@@ -59,6 +82,7 @@ def add(text: str, by: str, kind: str = "ai_observed") -> dict:
              "created_at": _now()}
     entries = _load()
     entries.append(entry)
+    _record_evictions(entries)   # ledger anything the cap is about to drop
     _save(entries)
     return entry
 
