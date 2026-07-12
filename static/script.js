@@ -2303,10 +2303,16 @@ document.getElementById('game-turn-btn').addEventListener('click', async () => {
     // queue whatever's typed in the move boxes first
     for (const ta of document.querySelectorAll('#game-moves textarea')) {
         if (ta.value.trim()) {
-            await fetch(`/api/games/${currentGame.id}/move`, {
+            const mres = await fetch(`/api/games/${currentGame.id}/move`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ player: ta.dataset.player, text: ta.value.trim() }),
             });
+            // A dropped move must not be swept into a turn the player thinks counted.
+            if (!mres.ok) {
+                alert((await mres.json().catch(() => ({}))).detail
+                    || 'Your move could not be submitted — try again.');
+                return;
+            }
         }
     }
     btn.disabled = true;

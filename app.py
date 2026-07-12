@@ -174,8 +174,32 @@ async def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
+_session_locks: dict = {}
+
+
+def _session_lock(session_id: str) -> asyncio.Lock:
+    lock = _session_locks.get(session_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _session_locks[session_id] = lock
+    return lock
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
+    # Serialize concurrent messages to the SAME session so two in-flight rounds
+    # can't both read the same round count, run, and overwrite each other — a
+    # double-tap or a second tab used to silently lose a whole paid-for round.
+    sid = (request.session_id
+           if request.session_id and session_manager.valid_id(request.session_id)
+           else None)
+    if sid:
+        async with _session_lock(sid):
+            return await _chat_impl(request)
+    return await _chat_impl(request)
+
+
+async def _chat_impl(request: ChatRequest):
     message = request.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message is empty")

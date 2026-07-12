@@ -197,6 +197,10 @@ verbatim from the footage — never invent or clean up a line."""
         try:
             rnd = int(m.get("round") or 0)
             score = max(1, min(100, int(m.get("score") or 50)))
+            # start/end were parsed unguarded below — a model that emits
+            # "R2"/"opening"/"3-4" for these crashed the whole cut.
+            start_round = int(m.get("start_round") or rnd)
+            end_round = int(m.get("end_round") or rnd)
         except (TypeError, ValueError):
             continue
         src = rounds_by_no.get(rnd, {})
@@ -204,8 +208,8 @@ verbatim from the footage — never invent or clean up a line."""
             "id": uuid.uuid4().hex[:12],
             "session_id": session.get("id", ""),
             "round": rnd,
-            "start_round": int(m.get("start_round") or rnd),
-            "end_round": int(m.get("end_round") or rnd),
+            "start_round": start_round,
+            "end_round": end_round,
             "timestamp": src.get("timestamp", ""),
             "speaker": str(m.get("speaker") or "")[:60],
             "event_type": m.get("event_type") if m.get("event_type") in EVENT_TYPES else "payoff",

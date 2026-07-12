@@ -75,8 +75,13 @@ async def load_session(session_id: str) -> Optional[dict]:
     path = _path(session_id)
     if not os.path.exists(path):
         return None
-    async with aiofiles.open(path, "r", encoding="utf-8") as f:
-        session = json.loads(await f.read())
+    # A corrupt/truncated file (crash mid-write, external edit) must degrade to
+    # "not found" — not 500 every endpoint that loads it. Matches list_sessions.
+    try:
+        async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            session = json.loads(await f.read())
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
     session["rounds"] = [normalize_round(r) for r in session.get("rounds", [])]
     return session
 

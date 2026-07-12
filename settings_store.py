@@ -15,6 +15,10 @@ import re
 import uuid
 from typing import List, Optional
 
+# A participant color is rendered into a style="background:..." attribute in
+# the browser; only plain 3- or 6-digit hex is allowed so nothing can escape it.
+_HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
 SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
@@ -208,7 +212,10 @@ def sanitize_participants(incoming: List[dict]) -> List[dict]:
             clean["api_key"] = api_key
         elif existing_by_id.get(pid, {}).get("api_key"):
             clean["api_key"] = existing_by_id[pid]["api_key"]
-        clean["color"] = p.get("color") or existing_by_id.get(pid, {}).get("color") or PALETTE[i % len(PALETTE)]
+        # Color reaches the browser inside style="background:..." — accept only
+        # plain hex so a crafted value can't break out of the attribute (XSS).
+        raw_color = str(p.get("color") or existing_by_id.get(pid, {}).get("color") or "").strip()
+        clean["color"] = raw_color if _HEX_COLOR.match(raw_color) else PALETTE[i % len(PALETTE)]
         # Resting: seat stays configured (key kept, desk intact) but isn't
         # called — for empty credit balances and broken provider consoles.
         if p.get("resting"):
