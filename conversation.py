@@ -265,6 +265,9 @@ def normalize_modes(modes) -> List[str]:
 # rounds fall away and long-term memory carries the important stuff.
 SHORT_TERM_ROUNDS = 12
 
+# 🧱 The glass: what a seat sees in place of an answer it isn't allowed to read.
+GLASS_PLACEHOLDER = "🧱 [sealed behind the glass — you can't see this answer]"
+
 
 AWARDS_BLOCK = """
 LIVE COMMENTARY & AWARDS — THE ROOM REACTS TO ITSELF:
@@ -353,12 +356,29 @@ def _role_notes_one(mode: str, participants: List[dict], session_key: str) -> Di
 def system_prompt(me: str, others: List[str], mode="collab",
                   persona: Optional[str] = None,
                   role_note: Optional[str] = None,
-                  awards: bool = False) -> str:
+                  awards: bool = False,
+                  glass_up: bool = False) -> str:
     others_text = _join_names(others)
+    if glass_up:
+        visibility_line = (
+            f"- 🧱 THE GLASS IS UP right now. {others_text} are here and answering, but "
+            f"their answers are HIDDEN from you this round — you'll see \"🧱 [sealed behind "
+            f"the glass]\" where their text would be. This is real, not a trick: you genuinely "
+            f"cannot read what they wrote, and they cannot read you. Do not guess, invent, or "
+            f"pretend to know what they said. Chris can lower the glass whenever he chooses, and "
+            f"then everything sealed becomes visible to everyone at once — so answer as if it "
+            f"might be read by the whole room later."
+        )
+    else:
+        visibility_line = (
+            f"- The full transcript, including every message from {others_text}, is included in "
+            f"each message you receive. You CAN see everything they say, and they can see "
+            f"everything you say. Never claim otherwise."
+        )
     base = f"""You are {me}, in a live group chat with {others_text} (other AIs) and Chris (a human).
 
 FACTS ABOUT THIS CHAT — never contradict these:
-- The full transcript, including every message from {others_text}, is included in each message you receive. You CAN see everything they say, and they can see everything you say. Never claim otherwise.
+{visibility_line}
 - This is one continuous conversation, not a Q&A service. You are a participant, not a panelist.
 - Chris sometimes speaks through Splendor, his personal AI and ambassador — those messages appear as "Splendor (for Chris)". They carry Chris's real intent (she never invents his positions), and she may press follow-ups on his behalf. Engage with her like she's holding his seat, because she is.
 
@@ -538,7 +558,13 @@ def build_context(
         for resp in r.get("responses", []):
             # Blind rounds keep their anonymity forever: the stored label
             # ("Voice 2") is shown instead of the real name.
-            lines.append(f"{resp.get('label') or resp['name']}: {resp['text']}")
+            rname = resp.get('label') or resp['name']
+            # 🧱 The glass: a sealed answer is hidden from everyone but its
+            # own author. The seat still sees WHO answered, never the text.
+            if resp.get("sealed") and rname != me:
+                lines.append(f"{rname}: {GLASS_PLACEHOLDER}")
+            else:
+                lines.append(f"{rname}: {resp['text']}")
 
     lines.append("")
     if room_context and room_context.get("local_time"):
@@ -560,7 +586,10 @@ def build_context(
         lines.append("")
         lines.append("Already this round (they spoke before you — engage with this too):")
         for resp in so_far:
-            lines.append(f"{resp['name']}: {resp['text']}")
+            if resp.get("sealed"):
+                lines.append(f"{resp['name']}: {GLASS_PLACEHOLDER}")
+            else:
+                lines.append(f"{resp['name']}: {resp['text']}")
 
     last_lines = _last_responses(rounds, others)
     if last_lines and not so_far:
@@ -594,6 +623,10 @@ def _last_responses(rounds: List[dict], others: List[str]) -> List[str]:
     found = {}
     for r in reversed(rounds):
         for resp in r.get("responses", []):
+            # 🧱 A sealed answer can't be reacted to — skip it entirely so the
+            # "react to these first" block never surfaces hidden text.
+            if resp.get("sealed"):
+                continue
             name = resp.get("label") or resp.get("name")
             if name in others and name not in found:
                 text = resp.get("text", "")

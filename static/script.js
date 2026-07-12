@@ -194,6 +194,41 @@ splendorToggle.checked = localStorage.getItem('teamtalk-splendor') === 'on';
 turnSelect.addEventListener('change', () => localStorage.setItem('teamtalk-turns', turnSelect.value));
 awardsToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-awards', awardsToggle.checked ? 'on' : 'off'));
+
+// 🧱 The Glass — server-side room state, not a per-browser preference.
+const glassToggle = document.getElementById('glass-toggle');
+const glassBanner = document.getElementById('glass-banner');
+function paintGlass(up) {
+    if (glassToggle) glassToggle.checked = !!up;
+    if (glassBanner) glassBanner.hidden = !up;
+}
+async function loadGlass() {
+    try {
+        const res = await fetch('/api/glass');
+        if (res.ok) paintGlass((await res.json()).up);
+    } catch (e) { /* leave toggle as-is if the server is unreachable */ }
+}
+if (glassToggle) {
+    glassToggle.addEventListener('change', async () => {
+        const up = glassToggle.checked;
+        try {
+            const res = await fetch('/api/glass', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                // Lowering the glass opens the windows on the active session.
+                body: JSON.stringify({ up, session_id: currentSessionId }),
+            });
+            const data = await res.json();
+            paintGlass(data.up);
+            if (!up && data.revealed)
+                console.log(`Glass lowered — ${data.revealed} sealed answer(s) revealed.`);
+        } catch (e) {
+            alert('Could not reach the room to change the glass. Try again.');
+            loadGlass();
+        }
+    });
+    loadGlass();
+}
 splendorToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-splendor', splendorToggle.checked ? 'on' : 'off'));
 

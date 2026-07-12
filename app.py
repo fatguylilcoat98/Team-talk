@@ -36,6 +36,7 @@ import failure_log
 import file_store
 import game_master
 import game_store
+import glass_store
 import history_store
 import journal_store
 import ledger
@@ -298,6 +299,10 @@ async def chat(request: ChatRequest):
 
     awards = bool(request.awards) and not blind
 
+    # 🧱 The glass: when raised, each seat answers without seeing the others'
+    # answers this round. They still know who's here and that they spoke.
+    glass_up = glass_store.is_up()
+
     def prompt_for(p, so_far=None):
         me = display[p["id"]]
         others = [display[q["id"]] for q in participants if q["id"] != p["id"]]
@@ -315,7 +320,8 @@ async def chat(request: ChatRequest):
         return (
             system_prompt(me, others, modes,
                           persona=None if blind else p.get("persona"),
-                          role_note=notes.get(p["id"]), awards=awards),
+                          role_note=notes.get(p["id"]), awards=awards,
+                          glass_up=glass_up),
             build_context(history, message, me, others, modes, so_far,
                           memory_block=mem, attachments_block=attachments_block,
                           episodes_block=episodes_block, via_splendor=via_splendor,
@@ -349,7 +355,9 @@ async def chat(request: ChatRequest):
             result = await api_client.call_participant(
                 p, system, ctx, images=images, context="chat", session_id=session["id"])
             if result["ok"]:
-                so_far.append({"name": display[p["id"]], "text": _strip_markers(result["text"])})
+                so_far.append({"name": display[p["id"]],
+                               "text": _strip_markers(result["text"]),
+                               "sealed": glass_up})
             responses.append(_response_entry(p, result, labels.get(p["id"])))
     else:
         # The core requirement: every AI is called at the same time
@@ -361,6 +369,12 @@ async def chat(request: ChatRequest):
         )
         responses = [_response_entry(p, r, labels.get(p["id"]))
                      for p, r in zip(participants, results)]
+
+    # 🧱 If the glass is up, this round's answers are sealed: the other seats
+    # will see "who answered" but not the text until Chris lowers the glass.
+    if glass_up:
+        for r in responses:
+            r["sealed"] = True
 
     # Long-term memory, notebook entries, pinned quotes, private journal
     # entries, and questions for Chris: strip the marker lines, store them
@@ -731,6 +745,33 @@ async def test_keys():
     participants = settings_store.get_participants()
     results = await asyncio.gather(*[api_client.test_participant(p) for p in participants])
     return {"results": list(results)}
+
+
+# --- 🧱 The Glass ----------------------------------------------------------
+
+class GlassUpdate(BaseModel):
+    up: bool
+    session_id: Optional[str] = None
+
+
+@app.get("/api/glass")
+async def get_glass():
+    return {"up": glass_store.is_up()}
+
+
+@app.post("/api/glass")
+async def set_glass(update: GlassUpdate):
+    glass_store.set_up(update.up)
+    revealed = 0
+    # Lowering the glass opens the windows: unseal the active session so every
+    # seat can finally read what was answered blind.
+    if not update.up and update.session_id and session_manager.valid_id(update.session_id):
+        session = await session_manager.load_session(update.session_id)
+        if session:
+            revealed = glass_store.unseal_session(session)
+            if revealed:
+                await session_manager.save_session(session)
+    return {"up": glass_store.is_up(), "revealed": revealed}
 
 
 # --- Uploads ----------------------------------------------------------------
