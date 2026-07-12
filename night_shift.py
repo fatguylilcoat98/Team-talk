@@ -197,6 +197,18 @@ believe is theater — but a consensus nobody tested is worse."""
     return base
 
 
+def _stance_label(m: dict) -> str:
+    """One log line's worth of stance — truncation discards SURFACE here,
+    mechanically, so the audit never depends on someone going spelunking
+    (the room's v6-round finding: a field nobody reads is a tombstone)."""
+    label = m["stance"].upper()
+    if m.get("discarded_stance"):
+        label += f" (cap hit — a parsed {m['discarded_stance'].upper()} was discarded as unattributable)"
+    if m.get("stance_note"):
+        label += f" — {m['stance_note']}"
+    return label
+
+
 def _context(run: dict) -> str:
     # The in-progress round's earlier replies are already in run["rounds"]
     # (state is saved per message), so the transcript walk covers both
@@ -207,14 +219,23 @@ def _context(run: dict) -> str:
     if older:
         lines = ["=== EARLIER (stance log — full text is in the record) ==="]
         for n, m in older:
-            lines.append(f"R{n} {m['name']}: {m['stance'].upper()}"
-                         + (f" — {m['stance_note']}" if m.get("stance_note") else ""))
+            lines.append(f"R{n} {m['name']}: {_stance_label(m)}")
         parts.append("\n".join(lines))
     if tail:
         lines = ["=== RECENT TURNS ==="]
         for n, m in tail:
-            lines.append(f"[R{n}] {m['name']}:\n{m['text']}" if m.get("ok")
-                         else f"[R{n}] {m['name']}: (errored — not their fault, skip them)")
+            if not m.get("ok"):
+                lines.append(f"[R{n}] {m['name']}: (errored — not their fault, skip them)")
+                continue
+            entry = f"[R{n}] {m['name']}:\n{m['text']}"
+            if m["stance"] == "truncated":
+                entry += ("\n[ENGINE NOTE: that reply hit its token cap — it is "
+                          "TRUNCATED and carries no authored stance"
+                          + (f"; a parsed {m['discarded_stance'].upper()} was discarded"
+                             if m.get("discarded_stance") else "")
+                          + ". Do not count it toward agreement; if its argument "
+                            "matters, restate it in your own words.]")
+            lines.append(entry)
         parts.append("\n\n".join(lines))
     parts.append("Your night turn. Add something that survives scrutiny, or converge. "
                  "End with your STANCE line.")
@@ -333,8 +354,7 @@ async def write_report(participants: List[dict]) -> Optional[dict]:
                   "Write it so it survives his review — receipts over rhetoric, "
                   "[unverified] where you can't check, no flattery of the room's work.")
         stance_log = "\n".join(
-            f"R{r['n']} {m['name']}: {m['stance'].upper()}"
-            + (f" — {m['stance_note']}" if m.get("stance_note") else "")
+            f"R{r['n']} {m['name']}: {_stance_label(m)}"
             for r in run["rounds"] for m in r["messages"])
         tail = [(r["n"], m) for r in run["rounds"]
                 for m in r["messages"]][-TAIL_MESSAGES:]

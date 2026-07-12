@@ -2490,7 +2490,9 @@ async function renderNight() {
                 item.className = 'memory-item';
                 item.innerHTML =
                     `<div class="memory-text"><strong style="color:${escapeText(m.color)}">${escapeText(m.name)}</strong>` +
-                    ` <span class="night-stance">${STANCE_BADGES[m.stance] || m.stance}${m.stance_note ? ' — ' + escapeText(m.stance_note) : ''}</span>` +
+                    ` <span class="night-stance">${STANCE_BADGES[m.stance] || m.stance}` +
+                    `${m.discarded_stance ? ' — discarded a parsed ' + escapeText(m.discarded_stance.toUpperCase()) : ''}` +
+                    `${m.stance_note ? ' — ' + escapeText(m.stance_note) : ''}</span>` +
                     `<div class="night-msg">${escapeText(m.text)}</div></div>`;
                 feed.appendChild(item);
             }
