@@ -1917,3 +1917,18 @@ button.danger:hover {
     cursor: pointer;
     white-space: nowrap;
 }
+
+/* 🛋️ The Lounge — a warmer, off-the-record room. */
+.lounge-banner {
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #4a3b2e;
+    color: #f3e9dc;
+    font-size: 13px;
+    border: 1px solid #6b5642;
+}
+body.lounge-active {
+    background: #f4ece0;   /* a warm, cozy shift — still light, still readable */
+}
+.lounge-toggle-label { white-space: nowrap; }

@@ -113,6 +113,7 @@ async def list_sessions() -> List[dict]:
             "created_at": session.get("created_at", ""),
             "rounds": len(rounds),
             "last_message": rounds[-1]["chris_message"] if rounds else "",
+            "lounge": bool(session.get("lounge")),
         })
     summaries.sort(key=lambda s: s["created_at"], reverse=True)
     return summaries

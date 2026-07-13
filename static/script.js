@@ -20,8 +20,10 @@ async function refreshSessions() {
     const res = await fetch('/api/sessions');
     const data = await res.json();
 
-    sessionSelect.innerHTML = '<option value="new">New Session</option>';
+    sessionSelect.innerHTML = `<option value="new">${loungeMode ? '🛋️ New Lounge chat' : 'New Session'}</option>`;
     for (const s of data.sessions) {
+        // The Living Room and the Lounge each show only their own sessions.
+        if (!!s.lounge !== loungeMode) continue;
         const opt = document.createElement('option');
         opt.value = s.id;
         const preview = s.last_message ? ` — ${s.last_message.slice(0, 40)}` : '';
@@ -196,6 +198,48 @@ awardsToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-awards', awardsToggle.checked ? 'on' : 'off'));
 splendorToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-splendor', splendorToggle.checked ? 'on' : 'off'));
+
+// --- 🛋️ The Lounge: a separate, off-the-record room ------------------------
+// Flip in and the Living Room session is set aside; you're in the Lounge's own
+// conversations, sent with lounge:true (stripped prompt, nothing remembered).
+// Flip out and business resumes exactly where it was.
+const loungeToggle = document.getElementById('lounge-toggle');
+const loungeBanner = document.getElementById('lounge-banner');
+let loungeMode = false;
+let savedBizSession = null;   // the Living Room session, parked while in the Lounge
+let loungeSessionId = localStorage.getItem('teamtalk-lounge-session') || null;
+
+function paintLounge() {
+    document.body.classList.toggle('lounge-active', loungeMode);
+    if (loungeBanner) loungeBanner.hidden = !loungeMode;
+    if (loungeToggle) loungeToggle.checked = loungeMode;
+}
+
+async function switchRoom(toLounge) {
+    if (toLounge) {
+        savedBizSession = currentSessionId;
+        loungeMode = true;
+        currentSessionId = loungeSessionId;
+    } else {
+        // remember which lounge chat was open for next time
+        if (currentSessionId) {
+            loungeSessionId = currentSessionId;
+            localStorage.setItem('teamtalk-lounge-session', loungeSessionId);
+        }
+        loungeMode = false;
+        currentSessionId = savedBizSession;
+    }
+    paintLounge();
+    historyDiv.innerHTML = '';
+    if (currentSessionId) {
+        await loadSession(currentSessionId);
+    }
+    await refreshSessions();
+}
+
+if (loungeToggle) {
+    loungeToggle.addEventListener('change', () => switchRoom(loungeToggle.checked));
+}
 
 // --- Voice mode: talk to the room, hear Splendor recap the crew -------------
 
@@ -442,6 +486,7 @@ async function sendMessage() {
                 via_splendor: splendorToggle.checked,
                 room_context: deviceContext(),
                 attachments: sentAttachments.map((a) => a.id),
+                lounge: loungeMode,
             }),
         });
         if (!res.ok) {
@@ -452,6 +497,10 @@ async function sendMessage() {
 
         const isNewSession = !currentSessionId;
         currentSessionId = data.session_id;
+        if (loungeMode) {
+            loungeSessionId = data.session_id;
+            localStorage.setItem('teamtalk-lounge-session', loungeSessionId);
+        }
         chrisInput.value = '';
         pendingAttachments = [];
         renderAttachChips();

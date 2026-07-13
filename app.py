@@ -55,6 +55,7 @@ import wall_store
 import workshop_engine
 import workshop_store
 from conversation import (MODES, SHORT_TERM_ROUNDS, blind_labels, build_context,
+                          lounge_system_prompt,
                           normalize_modes, role_notes, system_prompt)
 
 LAN_WARNING = "Do not expose Team Talk publicly unless authentication is added."
@@ -145,6 +146,7 @@ class ChatRequest(BaseModel):
     awards: Optional[bool] = True            # live commentary & awards layer
     via_splendor: Optional[bool] = False     # Splendor delivers Chris's message
     room_context: Optional[RoomContext] = None  # device-verified time & place
+    lounge: Optional[bool] = False           # 🛋️ off-the-record hangout room
 
 
 class ParticipantUpdate(BaseModel):
@@ -199,6 +201,67 @@ async def chat(request: ChatRequest):
     return await _chat_impl(request)
 
 
+async def _lounge_turn(session: dict, message: str, turn_style: str,
+                       room_context) -> dict:
+    """🛋️ One Lounge round. No memory, no markers, no awards, no ledger, no
+    workshop — just the stripped prompt and the conversation so far. Nothing is
+    graded or remembered; the session is tagged so it stays out of the Living
+    Room's business."""
+    session["lounge"] = True
+    history = session["rounds"]
+    round_number = len(history) + 1
+    turn_style = turn_style if turn_style in ("parallel", "sequential") else "parallel"
+    rc = room_context.clean() if room_context else None
+
+    participants = [p for p in settings_store.get_participants() if not p.get("resting")]
+    if not participants:
+        raise HTTPException(status_code=400,
+                            detail="Every seat is resting — wake at least one in Settings.")
+
+    def prompt_for(p, so_far=None):
+        me = p["name"]
+        others = [q["name"] for q in participants if q["id"] != p["id"]]
+        system = lounge_system_prompt(me, others)
+        ctx = build_context(history, message, me, others, mode="collab",
+                            so_far=so_far, memory_block="", room_context=rc,
+                            lounge=True)
+        return system, ctx
+
+    responses = []
+    if turn_style == "sequential":
+        rot = (round_number - 1) % len(participants)
+        order = participants[rot:] + participants[:rot]
+        so_far = []
+        for p in order:
+            system, ctx = prompt_for(p, so_far)
+            result = await api_client.call_participant(
+                p, system, ctx, context="chat", session_id=session["id"])
+            if result["ok"]:
+                so_far.append({"name": p["name"], "text": result["text"]})
+            responses.append(_response_entry(p, result))
+    else:
+        prompts = [prompt_for(p) for p in participants]
+        results = await asyncio.gather(
+            *[api_client.call_participant(p, s, c, context="chat", session_id=session["id"])
+              for p, (s, c) in zip(participants, prompts)])
+        responses = [_response_entry(p, r) for p, r in zip(participants, results)]
+
+    ok_count = sum(1 for r in responses if r.get("ok", True))
+    status = "success" if ok_count == len(responses) else ("partial" if ok_count else "error")
+    round_data = {
+        "round": round_number,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "chris_message": message,
+        "lounge": True,
+        "turn_style": turn_style,
+        **({"room_context": rc} if rc else {}),
+        "responses": responses,
+    }
+    session["rounds"].append(round_data)
+    await session_manager.save_session(session)
+    return {"session_id": session["id"], "status": status, "lounge": True, **round_data}
+
+
 async def _chat_impl(request: ChatRequest):
     message = request.message.strip()
     if not message:
@@ -215,6 +278,14 @@ async def _chat_impl(request: ChatRequest):
             session = session_manager.new_session(request.session_id)
     else:
         session = session_manager.new_session()
+
+    # 🛋️ The Lounge: a separate, off-the-record turn — stripped prompt, no
+    # memory/brain, no markers, no awards, no ledger. Nothing here is graded
+    # or remembered. Handled entirely apart from the business machinery below.
+    if request.lounge:
+        return await _lounge_turn(session, message,
+                                  request.turn_style,
+                                  request.room_context)
 
     history = session["rounds"]
     round_number = len(history) + 1

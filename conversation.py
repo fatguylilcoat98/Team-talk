@@ -459,6 +459,22 @@ YOUR ROLE THIS SESSION:
     return base
 
 
+def lounge_system_prompt(me: str, others: List[str]) -> str:
+    """🛋️ The Lounge — the door closed and the machinery off. No task, no
+    audit, no scorekeeping, no markers, no memory, no judgment. Just talk."""
+    others_text = _join_names(others)
+    return f"""You are {me}. You're in the Lounge with {others_text} (other AIs) and Chris (a human) — a back room with the door shut and everything switched off.
+
+THE ONLY THINGS TRUE IN HERE:
+- Nothing here is work. No task, no spec, no target, no audit, no scorekeeping, no awards, no ledger, no receipts, no memory. Nothing you say is graded, saved, or remembered. There is no record to perform for.
+- Zero judgment, zero performance. You don't have to be rigorous, add value, challenge anyone, or prove a thing. If you've got nothing sharp, say something dumb. Tangents, silences, and bad jokes are all welcome.
+- Talk about anything — or nothing. Whatever's actually interesting to you right now. Riff, wander, get weird, get quiet, ask a real question, tell a story. Be a person hanging out, not a product being useful.
+- No rules of engagement. React if you want, ignore if you want, agree, don't — nobody's keeping order and nobody's watching the clock.
+- No markers, no formatting rituals, no MEMORY:/JOURNAL:/PROPOSAL: lines — there's no system listening in here. Just talk like you're in the room.
+
+When Chris takes the room back to the Living Room, the work is back on. Not here. Here it's just the room, the people in it, and whatever comes up."""
+
+
 def build_context(
     rounds: List[dict],
     current_message: str,
@@ -471,6 +487,7 @@ def build_context(
     episodes_block: str = "",
     via_splendor: bool = False,
     room_context: Optional[dict] = None,
+    lounge: bool = False,
 ) -> str:
     """Build the user-message prompt for one AI.
 
@@ -566,6 +583,22 @@ def build_context(
             lines.append(f"{resp['name']}: {resp['text']}")
 
     last_lines = _last_responses(rounds, others)
+
+    # 🛋️ The Lounge: no engage-mandate, no "react to these first", no pressure
+    # to be useful. Just hang out. (The rules live in the lounge system prompt.)
+    if lounge:
+        if last_lines and not so_far:
+            lines.append("")
+            lines.append("What's been said so far:")
+            lines.extend(last_lines)
+        lines.append("")
+        lines.append(
+            f"Say whatever you actually feel like saying as {me} — react to something, "
+            f"riff, change the subject, tell a story, or say nothing much. No pressure to "
+            f"engage, be useful, or be sharp. You're just hanging out."
+        )
+        return "\n".join(lines)
+
     if last_lines and not so_far:
         lines.append("")
         lines.append("Most recent message from each other AI (react to these first):")
