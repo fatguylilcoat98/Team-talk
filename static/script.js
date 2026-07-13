@@ -229,6 +229,9 @@ async function switchRoom(toLounge) {
         loungeMode = false;
         currentSessionId = savedBizSession;
     }
+    // Persist the room so a page reload doesn't silently drop you back into the
+    // Living Room (with everything recording) while you think you're off the record.
+    localStorage.setItem('teamtalk-lounge-mode', loungeMode ? 'on' : 'off');
     paintLounge();
     historyDiv.innerHTML = '';
     if (currentSessionId) {
@@ -2816,6 +2819,14 @@ async function init() {
         renderLegend();
     } catch (err) {
         // legend just stays minimal if settings can't load
+    }
+    // Restore the Lounge across reloads — otherwise a refresh silently returns
+    // you to the Living Room and the next messages record with everything on.
+    if (localStorage.getItem('teamtalk-lounge-mode') === 'on') {
+        loungeMode = true;
+        currentSessionId = loungeSessionId;
+        paintLounge();
+        if (currentSessionId) { await loadSession(currentSessionId); }
     }
     await refreshSessions();
     chrisInput.focus();
