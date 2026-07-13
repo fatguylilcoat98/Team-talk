@@ -1737,7 +1737,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals', 'studio'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals', 'studio', 'mission'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1757,6 +1757,7 @@ function showArea(area) {
     if (area === 'night') renderNight();
     if (area === 'proposals') renderProposals();
     if (area === 'studio') renderStudio();
+    if (area === 'mission') renderMission();
 }
 
 roomNav.addEventListener('click', (e) => {
@@ -1857,6 +1858,259 @@ async function buildStudio(pitchId) {
         renderStudio();
     } catch (e) {
         alert('Could not reach the room.');
+    }
+}
+
+// --- 🎯 Mission Impossible (the hard-question process)
+const MISSION_STEPS = ['register', 'discovery', 'construction', 'red_team', 'verification'];
+const MISSION_STEP_LABEL = {
+    register: '0 · Pre-register', discovery: '1 · Discovery', construction: '2 · Construction',
+    red_team: '3 · Red Team', verification: '4 · Verification',
+};
+
+async function missionPost(path, body) {
+    try {
+        const res = await fetch(path, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {}),
+        });
+        if (!res.ok) { alert((await res.json().catch(() => ({}))).detail || 'Request failed.'); return null; }
+        return await res.json();
+    } catch (e) { alert('Could not reach the room.'); return null; }
+}
+
+async function renderMission() {
+    const el = document.getElementById('mission-body');
+    if (!el) return;
+    let data;
+    try {
+        const res = await fetch('/api/mission');
+        if (res.status === 404) { el.innerHTML = '<p class="empty-hint">Mission Impossible needs a server restart — run: sudo systemctl restart team-talk</p>'; return; }
+        data = await res.json();
+    } catch (e) { el.innerHTML = '<p class="empty-hint">Could not load Mission Impossible.</p>'; return; }
+    el.innerHTML = '';
+    const m = data.active;
+
+    // The active mission, or the create form.
+    if (!m) {
+        const box = document.createElement('div');
+        box.className = 'memory-item';
+        box.innerHTML =
+            '<div class="memory-text"><strong>Point the whole council at one hard question.</strong>' +
+            '<div class="field-note">A structured gauntlet: pre-register what counts as progress, discover blind, ' +
+            'build the strongest candidate, then everyone switches sides and tries to break it. The honest output is ' +
+            'a candidate for human review — never a claim that it’s solved.</div></div>';
+        const q = document.createElement('textarea');
+        q.id = 'mission-q'; q.rows = 3; q.placeholder = 'The impossible question (an open problem, a hard claim to stress-test)…';
+        q.className = 'mission-input';
+        const noteRow = document.createElement('div');
+        noteRow.className = 'field-note';
+        noteRow.innerHTML = 'Is it mechanically checkable? ' +
+            '<select id="mission-checker"><option value="none">no checker — human review</option>' +
+            '<option value="script">yes — a code/proof checker will rule</option>' +
+            '<option value="manual">Chris checks by hand</option></select>';
+        const start = document.createElement('button');
+        start.className = 'primary'; start.textContent = '🎯 Open the mission';
+        start.addEventListener('click', async () => {
+            const question = q.value.trim();
+            if (!question) { alert('The mission needs a question.'); return; }
+            const checker = document.getElementById('mission-checker').value;
+            const r = await missionPost('/api/mission', { question, checker_mode: checker });
+            if (r) renderMission();
+        });
+        box.appendChild(q); box.appendChild(noteRow); box.appendChild(start);
+        el.appendChild(box);
+        renderMissionClosed(el, data.closed);
+        return;
+    }
+
+    // Phase rail
+    const rail = document.createElement('div');
+    rail.className = 'mission-rail';
+    for (const s of MISSION_STEPS) {
+        const chip = document.createElement('span');
+        const done = MISSION_STEPS.indexOf(s) < MISSION_STEPS.indexOf(m.phase);
+        chip.className = 'mission-chip' + (s === m.phase ? ' active' : (done ? ' done' : ''));
+        chip.textContent = MISSION_STEP_LABEL[s];
+        rail.appendChild(chip);
+    }
+
+    const head = document.createElement('div');
+    head.className = 'memory-item';
+    head.innerHTML =
+        `<div class="memory-text"><strong>${escapeText(m.question)}</strong></div>` +
+        `<div class="memory-meta">attempt #${m.attempt_count} · ${escapeText(m.phase_title)}` +
+        (m.checker_mode !== 'none' ? ` · checker: ${escapeText(m.checker_mode)}` : '') + '</div>';
+    head.appendChild(rail);
+    if (m.registration && m.registration.sealed) {
+        const reg = document.createElement('div');
+        reg.className = 'night-msg';
+        reg.innerHTML = `🔒 <strong>Sealed win criteria:</strong> ${escapeText(m.registration.criteria)}`;
+        head.appendChild(reg);
+    }
+    if (m.orders) {
+        const orders = document.createElement('div');
+        orders.className = 'mission-orders';
+        orders.textContent = m.orders;
+        head.appendChild(orders);
+    }
+    el.appendChild(head);
+
+    // Phase-specific control
+    if (m.phase === 'register' && !(m.registration && m.registration.sealed)) {
+        const box = document.createElement('div');
+        box.className = 'memory-item';
+        box.innerHTML = '<div class="field-note">Lock in what would count as real progress on THIS question. ' +
+            'The room can also seal it from chat with a PROPOSAL: line — this is the manual capture.</div>';
+        const c = document.createElement('textarea');
+        c.rows = 2; c.className = 'mission-input'; c.placeholder = 'e.g. "an explicit construction beating the known bound of X", or "a hidden assumption in the standard attack, named precisely"…';
+        const seal = document.createElement('button');
+        seal.className = 'primary'; seal.textContent = '🔒 Seal the win criteria';
+        seal.addEventListener('click', async () => {
+            if (!c.value.trim()) { alert('Say what winning means first.'); return; }
+            const r = await missionPost('/api/mission/seal', { criteria: c.value.trim() });
+            if (r) renderMission();
+        });
+        box.appendChild(c); box.appendChild(seal);
+        el.appendChild(box);
+    }
+
+    const cur = m.current_attempt || {};
+    if (m.phase === 'construction') {
+        el.appendChild(missionCapture('Record the strongest candidate the room built:',
+            '/api/mission/candidate', 'text', '💾 Save candidate', cur.candidate));
+    }
+    if (m.phase === 'red_team' || m.phase === 'verification') {
+        if (cur.candidate) {
+            const cand = document.createElement('div');
+            cand.className = 'memory-item';
+            cand.innerHTML = `<div class="memory-text">🧩 <strong>Candidate on the table:</strong> ${escapeText(cur.candidate)}</div>`;
+            el.appendChild(cand);
+        }
+        if (m.phase === 'red_team') {
+            el.appendChild(missionBreakForm());
+        }
+        const breaks = (cur.breaks || []);
+        if (breaks.length) {
+            const bl = document.createElement('div');
+            bl.className = 'memory-item';
+            bl.innerHTML = `<div class="memory-meta">${breaks.length} break${breaks.length === 1 ? '' : 's'} logged — a survivor must answer every one</div>`;
+            for (const b of breaks) {
+                const row = document.createElement('div');
+                row.className = 'night-msg';
+                row.innerHTML = `💥 <strong>${escapeText(b.by)}:</strong> ${escapeText(b.text)}`;
+                bl.appendChild(row);
+            }
+            el.appendChild(bl);
+        }
+    }
+
+    // Advance / close controls
+    const controls = document.createElement('div');
+    controls.className = 'mission-controls';
+    const adv = document.createElement('button');
+    adv.className = 'primary';
+    adv.textContent = m.phase === 'verification' ? '↻ New attempt (run the gauntlet again)' : `→ Advance to ${MISSION_STEP_LABEL[MISSION_STEPS[MISSION_STEPS.indexOf(m.phase) + 1]] || 'next'}`;
+    adv.addEventListener('click', async () => {
+        const r = await missionPost('/api/mission/advance', {});
+        if (r) renderMission();
+    });
+    controls.appendChild(adv);
+
+    const exp = document.createElement('button');
+    exp.textContent = '📤 Export for human review';
+    exp.addEventListener('click', missionExport);
+    controls.appendChild(exp);
+    el.appendChild(controls);
+
+    // Close with an honest outcome
+    const closeBox = document.createElement('div');
+    closeBox.className = 'memory-item';
+    closeBox.innerHTML = '<div class="field-note">Close the mission with an honest outcome:</div>';
+    const sel = document.createElement('select');
+    sel.id = 'mission-outcome';
+    for (const [k, v] of Object.entries(data.outcomes)) {
+        const o = document.createElement('option'); o.value = k; o.textContent = v; sel.appendChild(o);
+    }
+    const note = document.createElement('input');
+    note.id = 'mission-close-note'; note.placeholder = 'one honest line (optional)'; note.className = 'mission-input';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'danger'; closeBtn.textContent = 'Close mission';
+    closeBtn.addEventListener('click', async () => {
+        if (!confirm('Close this mission?')) return;
+        const r = await missionPost('/api/mission/close', {
+            outcome: sel.value, note: note.value.trim(),
+        });
+        if (r) renderMission();
+    });
+    closeBox.appendChild(sel); closeBox.appendChild(note); closeBox.appendChild(closeBtn);
+    el.appendChild(closeBox);
+
+    renderMissionClosed(el, data.closed);
+}
+
+function missionCapture(label, path, field, btnText, existing) {
+    const box = document.createElement('div');
+    box.className = 'memory-item';
+    box.innerHTML = `<div class="field-note">${label}</div>`;
+    const ta = document.createElement('textarea');
+    ta.rows = 3; ta.className = 'mission-input'; ta.value = existing || '';
+    const btn = document.createElement('button');
+    btn.className = 'primary'; btn.textContent = btnText;
+    btn.addEventListener('click', async () => {
+        if (!ta.value.trim()) { alert('Nothing to save.'); return; }
+        const r = await missionPost(path, { [field]: ta.value.trim() });
+        if (r) renderMission();
+    });
+    box.appendChild(ta); box.appendChild(btn);
+    return box;
+}
+
+function missionBreakForm() {
+    const box = document.createElement('div');
+    box.className = 'memory-item';
+    box.innerHTML = '<div class="field-note">Log a red-team break against the candidate:</div>';
+    const who = document.createElement('input');
+    who.placeholder = 'who found it (seat name)'; who.className = 'mission-input';
+    const what = document.createElement('textarea');
+    what.rows = 2; what.className = 'mission-input'; what.placeholder = 'the flaw, the counterexample, the hidden assumption…';
+    const btn = document.createElement('button');
+    btn.textContent = '💥 Log the break';
+    btn.addEventListener('click', async () => {
+        if (!what.value.trim()) { alert('An empty break is not a break.'); return; }
+        const r = await missionPost('/api/mission/break', { by: who.value.trim() || 'the room', text: what.value.trim() });
+        if (r) renderMission();
+    });
+    box.appendChild(who); box.appendChild(what); box.appendChild(btn);
+    return box;
+}
+
+async function missionExport() {
+    try {
+        const res = await fetch('/api/mission/export');
+        if (!res.ok) { alert('Nothing to export yet.'); return; }
+        const { text } = await res.json();
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'mission-for-human-review.txt'; a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) { alert('Could not export.'); }
+}
+
+function renderMissionClosed(el, closed) {
+    if (!closed || !closed.length) return;
+    const h = document.createElement('div');
+    h.className = 'field-note'; h.style.marginTop = '1rem'; h.textContent = 'Past missions';
+    el.appendChild(h);
+    for (const m of closed) {
+        const item = document.createElement('div');
+        item.className = 'memory-item';
+        const outcome = (m.outcome || 'closed').replace(/_/g, ' ');
+        item.innerHTML =
+            `<div class="memory-text">${escapeText(m.question)}</div>` +
+            `<div class="memory-meta">${m.attempt_count} attempt${m.attempt_count === 1 ? '' : 's'} · ${escapeText(outcome)}</div>`;
+        el.appendChild(item);
     }
 }
 

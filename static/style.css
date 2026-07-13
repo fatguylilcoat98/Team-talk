@@ -1947,3 +1947,24 @@ body.lounge-active {
 }
 .save-mem-btn:hover { opacity: 1; background: var(--surface-2); color: var(--text); }
 .save-mem-btn:disabled { opacity: 1; color: #6fce97; border-color: #2f6a45; background: transparent; cursor: default; }
+
+/* 🎯 Mission Impossible */
+.mission-rail { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.mission-chip {
+    padding: 3px 10px; font-size: 12px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-dim); background: transparent; white-space: nowrap;
+}
+.mission-chip.done { color: #6fce97; border-color: #2f6a45; }
+.mission-chip.active { color: #0d1017; background: #d9b25a; border-color: #d9b25a; font-weight: 600; }
+.mission-orders {
+    margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    font-size: 13px; line-height: 1.5; color: var(--text);
+}
+.mission-input {
+    width: 100%; box-sizing: border-box; margin: 6px 0;
+    padding: 7px 9px; border-radius: 7px;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    font: inherit;
+}
+.mission-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }

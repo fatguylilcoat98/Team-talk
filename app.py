@@ -41,6 +41,7 @@ import journal_store
 import ledger
 import mailbox_store
 import memory_store
+import mission_store
 import mode_shift
 import night_shift
 import notebook_store
@@ -393,6 +394,7 @@ async def _chat_impl(request: ChatRequest):
                   workshop_store.context_block(settings_store.get_participants()),
                   proposal_store.context_block(),
                   studio_store.context_block(),
+                  mission_store.context_block(),
                   code_access.index_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
@@ -1885,6 +1887,96 @@ async def open_studio(body: StudioBuild):
     ledger.append("Chris", "studio_opened", ref=p["id"],
                   detail={"author": p.get("author_name", "?")})
     return studio_store.snapshot()
+
+
+# --- 🎯 Mission Impossible ----------------------------------------------------
+
+class MissionCreate(BaseModel):
+    question: str
+    checker_mode: Optional[str] = "none"
+    checker_note: Optional[str] = ""
+
+
+class MissionSeal(BaseModel):
+    criteria: str
+    commitment: Optional[str] = ""
+
+
+class MissionText(BaseModel):
+    text: str
+
+
+class MissionBreak(BaseModel):
+    by: str
+    text: str
+
+
+class MissionClose(BaseModel):
+    outcome: str
+    note: Optional[str] = ""
+
+
+@app.get("/api/mission")
+async def get_mission():
+    return mission_store.snapshot()
+
+
+@app.post("/api/mission")
+async def create_mission(body: MissionCreate):
+    try:
+        m = mission_store.create(body.question, body.checker_mode or "none",
+                                 body.checker_note or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return mission_store.snapshot()
+
+
+@app.post("/api/mission/seal")
+async def seal_mission(body: MissionSeal):
+    res = mission_store.seal_registration(body.criteria, body.commitment or "")
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res["reason"])
+    return mission_store.snapshot()
+
+
+@app.post("/api/mission/advance")
+async def advance_mission():
+    res = mission_store.advance()
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res["reason"])
+    return mission_store.snapshot()
+
+
+@app.post("/api/mission/candidate")
+async def mission_candidate(body: MissionText):
+    res = mission_store.set_candidate(body.text)
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res["reason"])
+    return mission_store.snapshot()
+
+
+@app.post("/api/mission/break")
+async def mission_break(body: MissionBreak):
+    res = mission_store.add_break(body.by, body.text)
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res["reason"])
+    return mission_store.snapshot()
+
+
+@app.post("/api/mission/close")
+async def close_mission(body: MissionClose):
+    res = mission_store.close(body.outcome, body.note or "")
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res["reason"])
+    return mission_store.snapshot()
+
+
+@app.get("/api/mission/export")
+async def export_mission():
+    text = mission_store.export_text()
+    if not text:
+        raise HTTPException(status_code=404, detail="No mission to export")
+    return {"text": text}
 
 
 # --- 🎬 Director's Cut --------------------------------------------------------

@@ -53,6 +53,7 @@
             <button data-area="night" title="Night Shift — the room works a topic while you're away, bounded and on the record">&#127769; Night Shift</button>
             <button data-area="proposals" title="Proposals — sealed ideas, blind debate, named at consequence">&#128229; Proposals</button>
             <button data-area="studio" title="The Studio — the creative room: seats pitch a build, the room votes, you build one a week">&#127912; Studio</button>
+            <button data-area="mission" title="Mission Impossible — point the whole council at one hard question and run the gauntlet: register, discover, construct, red-team, verify">&#127919; Mission</button>
         </nav>
 
         <div id="area-foyer" class="room-area hidden">
@@ -222,6 +223,12 @@
             <h3 class="nb-heading">Built</h3>
             <div id="studio-built" class="memory-list"></div>
             <p class="field-note">The creative room. A seat drops <code>PITCH: &lt;idea&gt;</code> in chat (one favorite each); the room votes with <code>VOTE: &lt;id&gt;</code> — never its own. Most-voted wins, and you build one a week. Losing pitches stay on the board for a future week; when a build ships, it's credited to whoever pitched it.</p>
+        </div>
+
+        <div id="area-mission" class="room-area hidden">
+            <h3 class="nb-heading">&#127919; Mission Impossible</h3>
+            <div id="mission-body" class="memory-list"></div>
+            <p class="field-note">A hard question run as a process. The room moves through five phases — pre-register the win, discover blind, construct the strongest candidate, red-team it from every side, then verify. A checker rules when one exists; otherwise the honest output is a candidate for <strong>human review</strong>, never a claim that it's solved. Every phase change is a ledger event, so the genealogy of an idea is never lost.</p>
         </div>
 
         <div id="area-living" class="room-area">

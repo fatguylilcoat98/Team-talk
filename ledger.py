@@ -55,6 +55,12 @@ ACTIONS = {
     "receipt_evicted_undelivered",
     # workshop chain repair
     "workshop_verdict_overridden", "workshop_reanchored",
+    # the studio (creative room)
+    "studio_pitch", "studio_vote", "studio_built", "studio_opened",
+    # 🎯 mission impossible (the hard-question process)
+    "mission_opened", "mission_registered", "mission_phase",
+    "mission_candidate", "mission_break", "mission_attempt_started",
+    "mission_closed",
 }
 
 
