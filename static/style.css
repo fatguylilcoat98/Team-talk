@@ -1917,3 +1917,33 @@ button.danger:hover {
     cursor: pointer;
     white-space: nowrap;
 }
+
+/* 🛋️ The Lounge — a warmer, off-the-record room. */
+.lounge-banner {
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #4a3b2e;
+    color: #f3e9dc;
+    font-size: 13px;
+    border: 1px solid #6b5642;
+}
+body.lounge-active {
+    background: #1c1712;   /* a warm, dark, cozy shift on the dark theme */
+}
+.lounge-toggle-label { white-space: nowrap; }
+
+/* 💾 Per-message "save to memory" — subtle until hovered/tapped. */
+.save-mem-btn {
+    margin-top: 8px;
+    padding: 3px 9px;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    opacity: 0.6;
+}
+.save-mem-btn:hover { opacity: 1; background: var(--surface-2); color: var(--text); }
+.save-mem-btn:disabled { opacity: 1; color: #6fce97; border-color: #2f6a45; background: transparent; cursor: default; }

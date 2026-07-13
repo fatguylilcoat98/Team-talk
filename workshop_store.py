@@ -23,6 +23,8 @@ import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
+import ledger
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSHOP_DIR = os.path.join(BASE_DIR, "workshop")
 STATE_PATH = os.path.join(WORKSHOP_DIR, "state.json")
@@ -159,7 +161,8 @@ def append_version(content: str, by: str, note: str = "",
     a version number and overwrite its file. Real versions only, here."""
     _ensure_dirs()
     chain = [e for e in _read_chain()
-             if not e.get("verdict_for") and not e.get("_corrupt")]
+             if not e.get("verdict_for") and not e.get("reanchor_for")
+             and not e.get("_corrupt")]
     v = (max(e.get("v", 0) for e in chain) + 1) if chain else 1
     prev = chain[-1]["hash"] if chain else GENESIS
     ts = _now()
@@ -189,6 +192,17 @@ def update_check(v: int, status: str, output: str) -> None:
     chain = _read_chain()
     if not any(e.get("v") == v for e in chain):
         return
+    # A later verdict on the same version silently superseded an earlier one in
+    # latest_passing() (last-in-file-order wins). Re-ruling is legitimate, but
+    # it must be on the record — otherwise a "passed" can quietly become
+    # "failed" with no trace, the same silent-eviction hole as the memory cap.
+    prior = [e for e in chain if e.get("verdict_for") == v]
+    if prior:
+        old_status = (prior[-1].get("check") or {}).get("status")
+        if old_status != str(status)[:20]:
+            ledger.append("Chris", "workshop_verdict_overridden", ref=f"v{v}",
+                          detail={"from": old_status, "to": str(status)[:20],
+                                  "note": "a later verdict supersedes the earlier one on this version"})
     entry = {
         "v": v, "ts": _now(), "by": "Chris",
         "verdict_for": v,
@@ -219,7 +233,7 @@ def latest_passing() -> Optional[dict]:
             verdicts[e["verdict_for"]] = e["check"]["status"]
     best = None
     for e in _read_chain():
-        if e.get("_corrupt") or e.get("verdict_for"):
+        if e.get("_corrupt") or e.get("verdict_for") or e.get("reanchor_for"):
             continue
         status = verdicts.get(e["v"], e["check"]["status"])
         if status in ("passed", "seed"):
@@ -228,18 +242,85 @@ def latest_passing() -> Optional[dict]:
 
 
 def verify_chain() -> dict:
+    all_rows = _read_chain()
+    # Accepted re-anchors: an authored, append-only acceptance of a KNOWN break,
+    # pinned to that version's exact hash. It forgives a broken LINK (a scar we
+    # can't rewrite) but never a tampered ROW — if the version's own content is
+    # altered, its hash changes, the pin no longer matches, and the break is back.
+    reanchors = {e["reanchor_for"]: e.get("accepted_hash")
+                 for e in all_rows if e.get("reanchor_for")}
+    entries = [e for e in all_rows
+               if not e.get("verdict_for") and not e.get("reanchor_for")]
     prev = GENESIS
-    entries = [e for e in _read_chain() if not e.get("verdict_for")]
     for e in entries:
         if e.get("_corrupt"):
-            return {"valid": False, "length": len(entries), "first_bad": None}
-        expected = version_hash(e.get("v", 0), e.get("ts", ""), e.get("by", ""),
+            return {"valid": False, "length": len(entries), "first_bad": None,
+                    "reanchored": sorted(reanchors)}
+        v = e.get("v")
+        # The chain protects row METADATA, but the thing the Workshop gatekeeps
+        # is the artifact CONTENT. Re-hash the actual v{n}.txt on disk and hold
+        # it against the row's content_hash — otherwise the file can be swapped
+        # under a still-"valid" chain. Not re-anchorable: it's altered content.
+        disk = read_version(v)
+        if disk is None:
+            return {"valid": False, "length": len(entries), "first_bad": v,
+                    "reason": "artifact file missing", "reanchored": sorted(reanchors)}
+        if _sha(disk) != e.get("content_hash"):
+            return {"valid": False, "length": len(entries), "first_bad": v,
+                    "reason": "artifact content altered", "reanchored": sorted(reanchors)}
+        expected = version_hash(v or 0, e.get("ts", ""), e.get("by", ""),
                                 e.get("content_hash", ""),
                                 e.get("check", {}).get("status", ""), e.get("prev_hash", ""))
-        if e.get("prev_hash") != prev or e.get("hash") != expected:
-            return {"valid": False, "length": len(entries), "first_bad": e.get("v")}
+        if e.get("hash") != expected:
+            # The row hashes its own fields wrong — tampered content, not a mere
+            # broken link. A re-anchor cannot forgive this.
+            return {"valid": False, "length": len(entries), "first_bad": v,
+                    "reason": "row hash mismatch", "reanchored": sorted(reanchors)}
+        if e.get("prev_hash") != prev:
+            if reanchors.get(v) == e.get("hash"):
+                prev = e["hash"]     # accepted re-root from this version onward
+                continue
+            # Distinguish the genuine historical scar from laundered tampering.
+            # A DANGLING row (empty/GENESIS prev_hash — no real parent recorded,
+            # like the verdict-row bug that first broke the chain) is the real
+            # break, and re-anchorable. But a prev_hash that NAMES a real parent
+            # which no longer matches the actual predecessor means an UPSTREAM
+            # content row was rewritten (its own hash recomputed to stay
+            # self-consistent, pushing the break one row down). Re-anchoring here
+            # would forgive that tamper — so it is NOT re-anchorable.
+            ph = e.get("prev_hash") or ""
+            if ph and ph != GENESIS:
+                return {"valid": False, "length": len(entries), "first_bad": v,
+                        "reason": "upstream row altered", "reanchored": sorted(reanchors)}
+            return {"valid": False, "length": len(entries), "first_bad": v,
+                    "reason": "broken chain link", "reanchored": sorted(reanchors)}
         prev = e["hash"]
-    return {"valid": True, "length": len(entries), "first_bad": None}
+    return {"valid": True, "length": len(entries), "first_bad": None,
+            "reanchored": sorted(reanchors)}
+
+
+def reanchor(v: int, reason: str, authority: str = "Chris") -> Optional[dict]:
+    """Accept a known chain break at version v. Append-only: a re-anchor row
+    rides outside the content chain (like a verdict row) and pins to v's CURRENT
+    hash. v's own row is never rewritten — the scar stays permanently visible;
+    the re-anchor just records that it is known, accepted, and by whom. Returns
+    None if v isn't a real content version."""
+    target = next((e for e in _read_chain()
+                   if e.get("v") == v and not e.get("verdict_for")
+                   and not e.get("reanchor_for")), None)
+    if not target:
+        return None
+    row = {
+        "reanchor_for": v,
+        "ts": _now(),
+        "by": str(authority)[:60],
+        "reason": str(reason)[:300],
+        "accepted_hash": target.get("hash"),
+        "hash": "",   # rides outside the content chain, like verdict rows
+    }
+    with open(CHAIN_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return row
 
 
 # --- locks ------------------------------------------------------------------

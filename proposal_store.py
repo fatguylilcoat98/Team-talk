@@ -78,11 +78,14 @@ def extract(text: str) -> Tuple[str, List[str]]:
     kept = []
     for line in (text or "").splitlines():
         s = line.strip()
-        if s.upper().startswith("PROPOSAL:") and not found:
+        if s.upper().startswith("PROPOSAL:"):
+            # Strip EVERY proposal line from the visible reply — only the first
+            # is sealed, but a 2nd left in the text leaked its raw words and
+            # author, breaking the "anonymity starts at the marker" contract.
             body = s[len("PROPOSAL:"):].strip()
-            if body:
+            if body and not found:
                 found.append(body[:MAX_PROPOSAL])
-                continue
+            continue
         kept.append(line)
     return "\n".join(kept).strip(), found
 

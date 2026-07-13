@@ -63,6 +63,18 @@ _clients = {}
 # skipping the doomed first call that just wastes tokens.
 _reasoning_models = set()
 
+# A reply cut off by the token cap (finish_reason "length") with less than this
+# much visible text is a reasoning STUB, not an answer: the budget went to
+# hidden thinking and the model got cut off mid-word (Muse Spark's "Glass is
+# up - I"). Escalate it or surface the honest error — never pass the fragment
+# off as a real reply. A genuinely long reply that hit the cap keeps its text.
+_STUB_TEXT_CHARS = 400
+
+
+def _starved_stub(text: str, choice) -> bool:
+    return (getattr(choice, "finish_reason", "") == "length"
+            and len((text or "").strip()) < _STUB_TEXT_CHARS)
+
 
 def anthropic_key() -> Optional[str]:
     return settings_store.resolve("anthropic_api_key", "ANTHROPIC_API_KEY")
@@ -335,15 +347,16 @@ async def _attempt(p: dict, system: str, prompt: str, images: list,
             choice = response.choices[0]
             text = choice.message.content or ""
             tokens = response.usage.completion_tokens if response.usage else 0
-            if not text.strip() and getattr(choice, "finish_reason", "") == "length" \
+            if _starved_stub(text, choice) \
                     and budget < REASONING_MAX_TOKENS and not seat_cap:
                 # (A seat with an explicit cost cap never escalates — the cap
-                # is Chris bounding worst-case spend; an empty reply under it
+                # is Chris bounding worst-case spend; a starved reply under it
                 # returns the honest error instead of a surprise bill.)
                 # Reasoning models (Muse Spark, DeepSeek R1, o-series) can burn
                 # the whole budget on internal thinking and get cut off before
-                # writing a single visible word. Retry once with real headroom —
-                # and remember, so future calls skip the doomed first attempt.
+                # writing a single visible word — or after only a fragment of
+                # one. Retry once with real headroom — and remember, so future
+                # calls skip the doomed first attempt.
                 _reasoning_models.add(p["model"])
                 response = await client.chat.completions.create(
                     model=p["model"], max_tokens=REASONING_MAX_TOKENS, messages=messages,
@@ -352,6 +365,10 @@ async def _attempt(p: dict, system: str, prompt: str, images: list,
                 choice = response.choices[0]
                 text = choice.message.content or ""
                 tokens += response.usage.completion_tokens if response.usage else 0
+            # A fragment cut off by the cap is not a reply — surface the honest
+            # error (which the room handles) instead of storing half a sentence.
+            if _starved_stub(text, choice):
+                text = ""
         if not text.strip():
             return {
                 "text": (

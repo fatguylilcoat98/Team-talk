@@ -69,19 +69,22 @@ def _bench_context(target: dict, live_content: str, cycle_log: List[str],
 
 def extract_edit(text: str) -> Optional[dict]:
     """Returns {"pass": True, note} or {"pass": False, content, note} or None."""
+    # A real ```workshop fence is an EDIT even when the reply opens with a word
+    # like "PASS on the old approach — here's the rewrite:". Check the fence
+    # FIRST so a genuine submission is never thrown away as a pass.
+    m = FENCE.search(text or "")
+    if m:
+        content = m.group(1)
+        note_m = re.search(r"NOTE:\s*(.+)", text[m.end():])
+        note = (note_m.group(1).strip() if note_m else "")[:MAX_NOTE]
+        if len(content.encode("utf-8")) > workshop_store.MAX_ARTIFACT_BYTES:
+            return None
+        return {"pass": False, "content": content, "note": note}
     if PASS_RE.match(text or ""):
         first_lines = (text or "").strip().splitlines()
         note = first_lines[1].strip() if len(first_lines) > 1 else ""
         return {"pass": True, "note": note[:MAX_NOTE]}
-    m = FENCE.search(text or "")
-    if not m:
-        return None
-    content = m.group(1)
-    note_m = re.search(r"NOTE:\s*(.+)", text[m.end():])
-    note = (note_m.group(1).strip() if note_m else "")[:MAX_NOTE]
-    if len(content.encode("utf-8")) > workshop_store.MAX_ARTIFACT_BYTES:
-        return None
-    return {"pass": False, "content": content, "note": note}
+    return None
 
 
 async def run_check(target: dict, content: str) -> dict:

@@ -12,6 +12,8 @@ import json
 import os
 import random
 import uuid
+
+import ledger
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -52,8 +54,20 @@ def _load() -> dict:
     return {"notes": data.get("notes") or [], "connections": data.get("connections") or []}
 
 
+def _ledger_evicted(items: list, cap: int, action: str) -> None:
+    for e in items[:max(0, len(items) - cap)]:
+        already = e.get("tombstone")
+        # A tombstone aging off the cap gets recorded too — no silent floor.
+        ledger.append(e.get("author") or e.get("by") or "system", action,
+                      ref=e.get("id") or "",
+                      detail={"reason": f"aged out at the {cap} cap"
+                              + (" (was already a tombstone)" if already else ""),
+                              "text": (e.get("text") or "")[:200]})
+
+
 def _save(data: dict) -> None:
     os.makedirs(WALL_DIR, mode=0o700, exist_ok=True)
+    _ledger_evicted(data.get("notes", []), MAX_NOTES, "wall_note_evicted")
     data["notes"] = data["notes"][-MAX_NOTES:]
     tmp = f"{WALL_PATH}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:

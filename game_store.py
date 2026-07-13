@@ -88,17 +88,21 @@ def list_games() -> List[dict]:
         if not name.endswith(".json"):
             continue
         game = load_game(name[:-5])
-        if not game:
+        if not game or not game.get("id"):
             continue
-        out.append({
-            "id": game["id"],
-            "title": game["title"],
-            "created": game["created"],
-            "players": [p["name"] for p in game["players"]],
-            "gm": game["gm"]["name"],
-            "turns": len(game["turns"]),
-            "facts": sum(1 for fc in game["facts"] if fc.get("status") == "canon"),
-        })
+        # One malformed/legacy game file must not crash the whole picker.
+        try:
+            out.append({
+                "id": game["id"],
+                "title": game.get("title", ""),
+                "created": game.get("created", ""),
+                "players": [p.get("name", "") for p in game.get("players", [])],
+                "gm": (game.get("gm") or {}).get("name", ""),
+                "turns": len(game.get("turns", [])),
+                "facts": sum(1 for fc in game.get("facts", []) if fc.get("status") == "canon"),
+            })
+        except (KeyError, TypeError, AttributeError):
+            continue
     out.sort(key=lambda g: g["created"], reverse=True)
     return out
 

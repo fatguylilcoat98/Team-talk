@@ -75,8 +75,13 @@ async def load_session(session_id: str) -> Optional[dict]:
     path = _path(session_id)
     if not os.path.exists(path):
         return None
-    async with aiofiles.open(path, "r", encoding="utf-8") as f:
-        session = json.loads(await f.read())
+    # A corrupt/truncated file (crash mid-write, external edit) must degrade to
+    # "not found" — not 500 every endpoint that loads it. Matches list_sessions.
+    try:
+        async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            session = json.loads(await f.read())
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
     session["rounds"] = [normalize_round(r) for r in session.get("rounds", [])]
     return session
 
@@ -108,6 +113,7 @@ async def list_sessions() -> List[dict]:
             "created_at": session.get("created_at", ""),
             "rounds": len(rounds),
             "last_message": rounds[-1]["chris_message"] if rounds else "",
+            "lounge": bool(session.get("lounge")),
         })
     summaries.sort(key=lambda s: s["created_at"], reverse=True)
     return summaries
@@ -170,7 +176,12 @@ def export_html(session: dict) -> str:
             color = esc(resp.get("color", "#888888"))
             persona = resp.get("persona")
             persona_html = f'<span class="persona">🎭 {esc(persona)}</span>' if persona else ""
-            err = ' style="color:#b03030"' if str(resp.get("text", "")).startswith("Error:") else ""
+            # Prefer the structured ok flag; fall back to the text sniff for
+            # rounds saved before the flag existed.
+            _ok = resp.get("ok")
+            if _ok is None:
+                _ok = not str(resp.get("text", "")).startswith("Error:")
+            err = '' if _ok else ' style="color:#b03030"'
             # Blind rounds stay anonymous in the share page too
             shown_name = resp.get("label") or resp.get("name", "AI")
             parts.append(

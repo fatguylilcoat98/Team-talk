@@ -17,6 +17,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
+import ledger
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RECEIPTS_DIR = os.path.join(BASE_DIR, "memory")
 RECEIPTS_PATH = os.path.join(RECEIPTS_DIR, "receipts.json")
@@ -46,6 +48,18 @@ def _save(receipts: List[dict]) -> None:
         by_pid.setdefault(r.get("participant_id"), []).append(r)
     kept = []
     for pid, items in by_pid.items():
+        # A receipt aging out at the cap before it was ever delivered would
+        # erase a seat's proof that an action happened — the exact "did it
+        # happen?" gap this store exists to close. Record it before it goes.
+        if len(items) > MAX_PER_PARTICIPANT:
+            for dropped in items[:-MAX_PER_PARTICIPANT]:
+                if not dropped.get("delivered"):
+                    ledger.append(
+                        pid or "system", "receipt_evicted_undelivered",
+                        ref=dropped.get("id") or "",
+                        detail={"action": dropped.get("action"),
+                                "status": dropped.get("status"),
+                                "reason": f"aged out at the {MAX_PER_PARTICIPANT}-receipt cap before delivery"})
         kept.extend(items[-MAX_PER_PARTICIPANT:])
     kept.sort(key=lambda r: r.get("ts", ""))
     tmp = f"{RECEIPTS_PATH}.tmp"

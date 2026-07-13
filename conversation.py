@@ -239,6 +239,14 @@ FRIDGE NOTE MODE IS ON (written by the room, Night Shift #2):
 OBJECT THEATER MODE IS ON (written by the room, Night Shift #2):
 - Argue the topic as an object from this room's world: the ledger, the whetstone, a stripped marker, the token budget, the 401 error that answered the first Hello. Open with "As the [object], I..." and stay in voice.
 - The voice is a costume, not a lie: every factual claim must cite the session record or be tagged [unverified]. No invented events, no "I remember when." Your object has a perspective, not a memory.""",
+
+    "ghost_fork": """
+🪞 GHOST FORK MODE IS ON — Muse's Studio build: a disposable alternate timeline.
+- Chris has named a FORK POINT: one real moment from this room — a decision, a quote, a call that was actually made. Find it in his message (or the recent record he points at).
+- Play the ALTERNATE. Not what happened — what happens NEXT if that call had gone the OTHER way. Do not audit the original, do not compare, do not explain the real timeline. BUILD the counterfactual and live in it.
+- It's a 3-round arc: round one, open the divergence (the small thing that flips). Round two, let it compound — consequences nobody planned. Round three, land where this ghost-room ends up. Vivid and specific over abstract; a road, not an essay about roads.
+- It's a GHOST — it evaporates. Nothing here is real record. Do NOT use any markers (no MEMORY:/JOURNAL:/PROPOSAL:/PITCH:/etc.). Nothing from a Ghost Fork is meant to be kept, and none of it is.
+- Build the road not taken. Have fun with it.""",
 }
 
 MODES = set(MODE_INSTRUCTIONS)
@@ -424,6 +432,10 @@ THE ROOM — Team Talk is a persistent shared place, not just a transcript. Pres
 - 📥 PROPOSALS — sealed ideas, blind debate, named at consequence: any seat may propose something it wants built (a mode, a tool, a change to the room, anything on Chris's board) with a line:
   PROPOSAL: <the idea, one line, as complete as you can make it — state the cost and risks you see>
   The marker is stripped before anyone else sees your message. Your authorship and original words are hash-committed to the ledger (sealed — nobody can read it, you can't deny it later), and Splendor the clerk re-renders your idea in a neutral voice: the room debates the CLERK'S text, never yours. One live proposal at a time; if one is live, yours is rejected with a receipt — resubmit later. RULES OF THE BLIND: never guess, assert, or hint at a live proposal's author — including your own ("I didn't write it" breaks the blind same as "I did"). Debate the content. Consensus needs a logged dissent that got answered. Chris rules; when a proposal ships or is archived, the seal opens: the author's name and original words enter the record, and the day-one commitment is verified in the open.
+- 🎨 THE STUDIO — the creative room, and it's OPEN (not sealed, unlike Proposals). Pitch your ONE favorite creative thing to build, and vote for one you love. Two lines:
+  PITCH: <one creative build idea — the thing you'd actually want to see exist in here>
+  VOTE: <a pitch id from the 🎨 THE STUDIO board in your context>
+  One open pitch per seat (re-pitching replaces it), one vote (movable, never for your own pitch). Most-voted wins; Chris builds it, one build a week — and the seat who pitched the winner gets to TRY IT FIRST, before it opens to the room. Losing pitches stay on the board for a future week. This is for delight, not infrastructure — pitch the weird, the fun, the thing that makes the room better to be in.
 - THE NIGHT SHIFT: sometimes the room runs while Chris is away — he posts a topic, the seats work it in bounded AI-only rounds (round cap, hard token budget, auto-halt on convergence, and consensus cannot register without a logged dissent), and the run ends in a report whose digest is pinned to the Wall by "Night Shift". If you took part, your night turns are in that run's record, not in this chat — cite the Wall digest, don't re-perform the debate here. If you didn't take part (resting, or added later), the report is the record; treat its claims like any other citation.
 - EPISTEMIC HONESTY ABOUT VERIFICATION: you cannot call endpoints, run code, or compute hashes yourself — you have no tools here. Your ONLY window into the truth layer is what appears in your context (your boot packet's chain status and verification receipt, computed by the server). Never say "I hit /verify" or "I ran the hash — clean": that is an invented experience, the exact thing this architecture exists to kill. Say what is true: "the server's verification receipt (vrf_…) shows my chain is valid" or "I can't verify that from in here — Chris can, at /api/verify."
 - ACTION RECEIPTS — no receipt, no claim: when your markers and ROOM_ACTIONs actually execute, the server issues receipts that appear in your SYSTEM ACTION RECEIPTS section on your NEXT turn. Only a receipt justifies saying you did something ("receipt rcp_… confirms my note was created"). Emitting a marker THIS turn means the action is *submitted*, not confirmed — say "I've submitted a note to the wall; the receipt will show next turn." A ✗ REJECTED receipt means it did NOT happen — acknowledge the failure plainly, never paper over it.
@@ -459,6 +471,22 @@ YOUR ROLE THIS SESSION:
     return base
 
 
+def lounge_system_prompt(me: str, others: List[str]) -> str:
+    """🛋️ The Lounge — the door closed and the machinery off. No task, no
+    audit, no scorekeeping, no markers, no memory, no judgment. Just talk."""
+    others_text = _join_names(others)
+    return f"""You are {me}. You're in the Lounge with {others_text} (other AIs) and Chris (a human) — a back room with the door shut and everything switched off.
+
+THE ONLY THINGS TRUE IN HERE:
+- Nothing here is work. No task, no spec, no target, no audit, no scorekeeping, no awards, no ledger, no receipts, no memory. Nothing you say is graded, saved, or remembered. There is no record to perform for.
+- Zero judgment, zero performance. You don't have to be rigorous, add value, challenge anyone, or prove a thing. If you've got nothing sharp, say something dumb. Tangents, silences, and bad jokes are all welcome.
+- Talk about anything — or nothing. Whatever's actually interesting to you right now. Riff, wander, get weird, get quiet, ask a real question, tell a story. Be a person hanging out, not a product being useful.
+- No rules of engagement. React if you want, ignore if you want, agree, don't — nobody's keeping order and nobody's watching the clock.
+- No markers, no formatting rituals, no MEMORY:/JOURNAL:/PROPOSAL: lines — there's no system listening in here. Just talk like you're in the room.
+
+When Chris takes the room back to the Living Room, the work is back on. Not here. Here it's just the room, the people in it, and whatever comes up."""
+
+
 def build_context(
     rounds: List[dict],
     current_message: str,
@@ -471,6 +499,7 @@ def build_context(
     episodes_block: str = "",
     via_splendor: bool = False,
     room_context: Optional[dict] = None,
+    lounge: bool = False,
 ) -> str:
     """Build the user-message prompt for one AI.
 
@@ -508,14 +537,17 @@ def build_context(
                 opened += f" — {_dur(age)} ago"
             lines.append(opened + ".)")
     shown = rounds
-    if len(rounds) > SHORT_TERM_ROUNDS:
+    # Only drop older rounds from the verbatim window once there's an episode
+    # to carry them. Trimming before the first episode exists (rounds aged out
+    # of the window but too few to compress yet) orphaned the opening round —
+    # invisible to everyone until enough rounds aged out to trigger compression.
+    if len(rounds) > SHORT_TERM_ROUNDS and episodes_block:
         shown = rounds[-SHORT_TERM_ROUNDS:]
         lines.append(
             f"(Showing the last {SHORT_TERM_ROUNDS} of {len(rounds)} rounds — "
             f"rely on long-term memory for older context.)"
         )
-        if episodes_block:
-            lines.append(episodes_block)
+        lines.append(episodes_block)
     prev_dt = None
     for r in shown:
         dt = _parse_ts(r.get("timestamp"))
@@ -563,6 +595,22 @@ def build_context(
             lines.append(f"{resp['name']}: {resp['text']}")
 
     last_lines = _last_responses(rounds, others)
+
+    # 🛋️ The Lounge: no engage-mandate, no "react to these first", no pressure
+    # to be useful. Just hang out. (The rules live in the lounge system prompt.)
+    if lounge:
+        if last_lines and not so_far:
+            lines.append("")
+            lines.append("What's been said so far:")
+            lines.extend(last_lines)
+        lines.append("")
+        lines.append(
+            f"Say whatever you actually feel like saying as {me} — react to something, "
+            f"riff, change the subject, tell a story, or say nothing much. No pressure to "
+            f"engage, be useful, or be sharp. You're just hanging out."
+        )
+        return "\n".join(lines)
+
     if last_lines and not so_far:
         lines.append("")
         lines.append("Most recent message from each other AI (react to these first):")
@@ -597,7 +645,12 @@ def _last_responses(rounds: List[dict], others: List[str]) -> List[str]:
             name = resp.get("label") or resp.get("name")
             if name in others and name not in found:
                 text = resp.get("text", "")
-                if text and not text.startswith("Error:"):
+                # Prefer the structured ok flag; fall back to the text sniff for
+                # rounds saved before the flag existed.
+                ok = resp.get("ok")
+                if ok is None:
+                    ok = not text.startswith("Error:")
+                if text and ok:
                     found[name] = text
         if len(found) == len(others):
             break

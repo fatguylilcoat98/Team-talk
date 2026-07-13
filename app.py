@@ -46,6 +46,7 @@ import night_shift
 import notebook_store
 import proposal_store
 import questions_store
+import studio_store
 import receipt_store
 import room_actions
 import session_manager
@@ -55,6 +56,7 @@ import wall_store
 import workshop_engine
 import workshop_store
 from conversation import (MODES, SHORT_TERM_ROUNDS, blind_labels, build_context,
+                          lounge_system_prompt,
                           normalize_modes, role_notes, system_prompt)
 
 LAN_WARNING = "Do not expose Team Talk publicly unless authentication is added."
@@ -145,6 +147,7 @@ class ChatRequest(BaseModel):
     awards: Optional[bool] = True            # live commentary & awards layer
     via_splendor: Optional[bool] = False     # Splendor delivers Chris's message
     room_context: Optional[RoomContext] = None  # device-verified time & place
+    lounge: Optional[bool] = False           # 🛋️ off-the-record hangout room
 
 
 class ParticipantUpdate(BaseModel):
@@ -174,8 +177,125 @@ async def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
+_session_locks: dict = {}
+_SESSION_LOCKS_MAX = 2000   # keep the per-session lock table from growing forever
+
+
+def _session_lock(session_id: str) -> asyncio.Lock:
+    lock = _session_locks.get(session_id)
+    if lock is None:
+        # Before adding another, drop any idle (unheld) locks if the table has
+        # grown large — a held lock is never evicted, so this can't race a
+        # round in flight. Bounded cleanup for a long-lived server.
+        if len(_session_locks) >= _SESSION_LOCKS_MAX:
+            for k in [k for k, v in _session_locks.items() if not v.locked()]:
+                del _session_locks[k]
+        lock = asyncio.Lock()
+        _session_locks[session_id] = lock
+    return lock
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
+    # Serialize concurrent messages to the SAME session so two in-flight rounds
+    # can't both read the same round count, run, and overwrite each other — a
+    # double-tap or a second tab used to silently lose a whole paid-for round.
+    sid = (request.session_id
+           if request.session_id and session_manager.valid_id(request.session_id)
+           else None)
+    if sid:
+        async with _session_lock(sid):
+            return await _chat_impl(request)
+    return await _chat_impl(request)
+
+
+def _clean_markers(text: str, participants: list) -> str:
+    """Strip every marker line WITHOUT storing anything. Module-level twin of
+    the nested _strip_markers, so the Lounge can present a clean read too —
+    a stray MEMORY:/PITCH:/JOURNAL: line shouldn't show raw just because the
+    Lounge saves nothing."""
+    text, _ = memory_store.extract_memories(text)
+    text, _, _ = notebook_store.extract(text)
+    text, _ = journal_store.extract(text)
+    text, _ = questions_store.extract(text)
+    text, _ = mailbox_store.extract(text, participants)
+    text, _ = about_store.extract(text)
+    text, _ = code_access.extract(text)
+    text, _ = proposal_store.extract(text)
+    text, _, _ = studio_store.extract(text)
+    text, _ = mode_shift.extract(text)
+    text = room_actions._ACTION_LINE.sub("", text).strip()
+    return text
+
+
+async def _lounge_turn(session: dict, message: str, turn_style: str,
+                       room_context) -> dict:
+    """🛋️ One Lounge round. No memory, no markers, no awards, no ledger, no
+    workshop — just the stripped prompt and the conversation so far. Nothing is
+    graded or remembered; the session is tagged so it stays out of the Living
+    Room's business."""
+    session["lounge"] = True
+    history = session["rounds"]
+    round_number = len(history) + 1
+    turn_style = turn_style if turn_style in ("parallel", "sequential") else "parallel"
+    rc = room_context.clean() if room_context else None
+
+    participants = [p for p in settings_store.get_participants() if not p.get("resting")]
+    if not participants:
+        raise HTTPException(status_code=400,
+                            detail="Every seat is resting — wake at least one in Settings.")
+
+    def prompt_for(p, so_far=None):
+        me = p["name"]
+        others = [q["name"] for q in participants if q["id"] != p["id"]]
+        system = lounge_system_prompt(me, others)
+        ctx = build_context(history, message, me, others, mode="collab",
+                            so_far=so_far, memory_block="", room_context=rc,
+                            lounge=True)
+        return system, ctx
+
+    responses = []
+    if turn_style == "sequential":
+        rot = (round_number - 1) % len(participants)
+        order = participants[rot:] + participants[:rot]
+        so_far = []
+        for p in order:
+            system, ctx = prompt_for(p, so_far)
+            result = await api_client.call_participant(
+                p, system, ctx, context="chat", session_id=session["id"])
+            if result["ok"]:
+                so_far.append({"name": p["name"],
+                               "text": _clean_markers(result["text"], participants)})
+            responses.append(_response_entry(p, result))
+    else:
+        prompts = [prompt_for(p) for p in participants]
+        results = await asyncio.gather(
+            *[api_client.call_participant(p, s, c, context="chat", session_id=session["id"])
+              for p, (s, c) in zip(participants, prompts)])
+        responses = [_response_entry(p, r) for p, r in zip(participants, results)]
+
+    # Nothing is stored in the Lounge, but stray marker lines still get stripped
+    # from the visible read so it stays consistent with every other room.
+    for r in responses:
+        r["text"] = _clean_markers(r["text"], participants)
+
+    ok_count = sum(1 for r in responses if r.get("ok", True))
+    status = "success" if ok_count == len(responses) else ("partial" if ok_count else "error")
+    round_data = {
+        "round": round_number,
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "chris_message": message,
+        "lounge": True,
+        "turn_style": turn_style,
+        **({"room_context": rc} if rc else {}),
+        "responses": responses,
+    }
+    session["rounds"].append(round_data)
+    await session_manager.save_session(session)
+    return {"session_id": session["id"], "status": status, "lounge": True, **round_data}
+
+
+async def _chat_impl(request: ChatRequest):
     message = request.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message is empty")
@@ -191,6 +311,14 @@ async def chat(request: ChatRequest):
             session = session_manager.new_session(request.session_id)
     else:
         session = session_manager.new_session()
+
+    # 🛋️ The Lounge: a separate, off-the-record turn — stripped prompt, no
+    # memory/brain, no markers, no awards, no ledger. Nothing here is graded
+    # or remembered. Handled entirely apart from the business machinery below.
+    if request.lounge:
+        return await _lounge_turn(session, message,
+                                  request.turn_style,
+                                  request.room_context)
 
     history = session["rounds"]
     round_number = len(history) + 1
@@ -264,6 +392,7 @@ async def chat(request: ChatRequest):
                   questions_store.context_block(),
                   workshop_store.context_block(settings_store.get_participants()),
                   proposal_store.context_block(),
+                  studio_store.context_block(),
                   code_access.index_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
@@ -334,6 +463,7 @@ async def chat(request: ChatRequest):
         text, _ = about_store.extract(text)
         text, _ = code_access.extract(text)
         text, _ = proposal_store.extract(text)
+        text, _, _ = studio_store.extract(text)
         text, _ = mode_shift.extract(text)
         text = room_actions._ACTION_LINE.sub("", text).strip()
         return text
@@ -367,41 +497,62 @@ async def chat(request: ChatRequest):
     # on disk, and record every write in the glass-box ledger. In blind
     # mode public credits go to the anonymous voice, not the real name —
     # but a journal always belongs to the real participant (it's private).
+    ghost_fork = "ghost_fork" in modes
     for r in responses:
         author = r.get("label") or r["name"]
+        if ghost_fork:
+            # 🪞 A Ghost Fork evaporates: strip any stray markers for a clean
+            # read, but save NOTHING — no memory, no journal, no receipts.
+            r["text"] = _strip_markers(r["text"])
+            continue
         cleaned, memories = memory_store.extract_memories(r["text"])
         if memories:
             r["text"] = cleaned
-            for m in memories:
+            kept = memories[:memory_store.MAX_PER_MESSAGE]
+            for m in kept:
                 entry = memory_store.add(m, author)
                 ledger.append(author, "memory_created", ref=entry["id"],
                               detail={"text": m[:200]})
                 receipt_store.issue(r["id"], "save_memory", "success",
                                     {"memory_id": entry["id"]})
-            r["memories_saved"] = len(memories)
+            # Over-cap memories get a ✗ REJECTED receipt, not a silent drop.
+            for _ in memories[memory_store.MAX_PER_MESSAGE:]:
+                receipt_store.issue(r["id"], "save_memory", "rejected",
+                                    {"reason": f"over the {memory_store.MAX_PER_MESSAGE}-memory-per-message limit — not saved"})
+            r["memories_saved"] = len(kept)
         cleaned, notes_saved, pins_saved = notebook_store.extract(r["text"])
         if notes_saved or pins_saved:
             r["text"] = cleaned
-            for n in notes_saved:
+            kept_notes = notes_saved[:notebook_store.MAX_ENTRIES_PER_MSG]
+            kept_pins = pins_saved[:notebook_store.MAX_PINS_PER_MSG]
+            for n in kept_notes:
                 entry = notebook_store.add_entry(n, author)
                 ledger.append(author, "notebook_written", ref=entry["id"],
                               detail={"text": n[:200]})
                 receipt_store.issue(r["id"], "notebook_write", "success",
                                     {"entry_id": entry["id"]})
-            for q in pins_saved:
+            for q in kept_pins:
                 pin = notebook_store.add_pin(q, author)
                 ledger.append(author, "pin_created", ref=pin["id"],
                               detail={"quote": q[:200]})
                 receipt_store.issue(r["id"], "pin_quote", "success",
                                     {"pin_id": pin["id"]})
-            if notes_saved:
-                r["notebook_saved"] = len(notes_saved)
-            if pins_saved:
-                r["pins_saved"] = len(pins_saved)
+            # Over-cap notes/pins get a ✗ REJECTED receipt, not a silent drop.
+            for _ in notes_saved[notebook_store.MAX_ENTRIES_PER_MSG:]:
+                receipt_store.issue(r["id"], "notebook_write", "rejected",
+                                    {"reason": f"over the {notebook_store.MAX_ENTRIES_PER_MSG}-note-per-message limit — not saved"})
+            for _ in pins_saved[notebook_store.MAX_PINS_PER_MSG:]:
+                receipt_store.issue(r["id"], "pin_quote", "rejected",
+                                    {"reason": f"over the {notebook_store.MAX_PINS_PER_MSG}-pin-per-message limit — not saved"})
+            if kept_notes:
+                r["notebook_saved"] = len(kept_notes)
+            if kept_pins:
+                r["pins_saved"] = len(kept_pins)
         cleaned, journal_entries = journal_store.extract(r["text"])
         if journal_entries:
             r["text"] = cleaned
-            for j in journal_entries:
+            kept_journal = journal_entries[:journal_store.MAX_PER_MESSAGE]
+            for j in kept_journal:
                 entry = journal_store.write(
                     r["id"], r["name"], session["id"], j["note"],
                     intent=j["intent"], recognized=j["recognized"],
@@ -415,7 +566,11 @@ async def chat(request: ChatRequest):
                     receipt_store.issue(r["id"], "journal_write", "success",
                                         {"version": entry["version"],
                                          "hash": entry["hash"][:12]})
-            r["journal_saved"] = len(journal_entries)
+            # Over-cap journal entries get a ✗ REJECTED receipt, not a silent drop.
+            for _ in journal_entries[journal_store.MAX_PER_MESSAGE:]:
+                receipt_store.issue(r["id"], "journal_write", "rejected",
+                                    {"reason": f"over the {journal_store.MAX_PER_MESSAGE}-journal-per-message limit — not saved"})
+            r["journal_saved"] = len(kept_journal)
         cleaned, asked = questions_store.extract(r["text"])
         if asked:
             r["text"] = cleaned
@@ -497,6 +652,35 @@ async def chat(request: ChatRequest):
                 else:
                     receipt_store.issue(r["id"], "proposal_submit", "rejected",
                                         {"reason": "a proposal is already live — one at a time"})
+        # 🎨 THE STUDIO — pitch a creative build / vote for one (open, not sealed).
+        cleaned, pitches, votes = studio_store.extract(r["text"])
+        if pitches or votes or cleaned != r["text"]:
+            r["text"] = cleaned
+            for idea in pitches[:1]:            # one favorite per message
+                res = studio_store.add_pitch(r["id"], author, idea)
+                p = res["pitch"]
+                ledger.append(author, "studio_pitch", ref=p["id"],
+                              detail={"text": idea[:200], "replaced": res["replaced"]})
+                receipt_store.issue(r["id"], "studio_pitch", "success",
+                                    {"pitch_id": p["id"],
+                                     "note": "replaced your prior pitch" if res["replaced"] else "on the board"})
+                r["studio_pitched"] = True
+            for _ in pitches[1:]:
+                receipt_store.issue(r["id"], "studio_pitch", "rejected",
+                                    {"reason": "one favorite pitch per message — keep only your best"})
+            for ref in votes[:1]:              # one vote per message
+                vres = studio_store.vote(r["id"], author, ref)
+                if vres["ok"]:
+                    ledger.append(author, "studio_vote", ref=vres["pitch"]["id"], detail={})
+                    receipt_store.issue(r["id"], "studio_vote", "success",
+                                        {"pitch_id": vres["pitch"]["id"],
+                                         "for": vres["pitch"].get("author_name", "?")})
+                    r["studio_voted"] = vres["pitch"].get("author_name", "?")
+                else:
+                    receipt_store.issue(r["id"], "studio_vote", "rejected", {"reason": vres["reason"]})
+            for _ in votes[1:]:
+                receipt_store.issue(r["id"], "studio_vote", "rejected",
+                                    {"reason": "one vote per message"})
         # 🔀 SHIFT TO — the seats' own mode power (Night Shift #2 spec).
         # Evaluated in response order = turn order, so earliest seat wins.
         cleaned, shift_requests = mode_shift.extract(r["text"])
@@ -527,7 +711,8 @@ async def chat(request: ChatRequest):
                         "success" if a.get("ok") else "rejected",
                         {"result": a.get("detail", "")})
 
-    ok_count = sum(1 for r in responses if not r["text"].startswith("Error:"))
+    ok_count = sum(1 for r in responses
+                   if r.get("ok", not r["text"].startswith("Error:")))
     if ok_count == len(responses):
         status = "success"
     elif ok_count:
@@ -549,6 +734,10 @@ async def chat(request: ChatRequest):
             {"id": m["id"], "name": m["name"], "kind": m["kind"]} for m in att_metas
         ],
         **({"mode_shifts": shift_notices} if shift_notices else {}),
+        # 🪞 A Ghost Fork evaporates: it may sit in the verbatim window for a
+        # few rounds, but it must NEVER be compressed into cross-session
+        # episodic memory (episode_store.pending_chunk drops these).
+        **({"ghost_fork": True} if ghost_fork else {}),
         "responses": responses,
     }
 
@@ -634,6 +823,10 @@ def _response_entry(p: dict, result: dict, label: Optional[str] = None) -> dict:
         "name": p["name"],
         "text": result["text"],
         "tokens": result["tokens"],
+        # The structured truth of whether the call succeeded — so downstream
+        # never has to guess from an "Error:" text prefix (a real reply that
+        # happens to open with that word used to be miscounted and hidden).
+        "ok": bool(result.get("ok", True)),
         "color": p.get("color", "#93a0b8"),
     }
     if label:
@@ -767,11 +960,15 @@ async def get_memory():
 
 @app.post("/api/memory")
 async def add_memory(body: MemoryAdd):
-    """Chris states a fact directly — saved with [stated] provenance."""
+    """Chris states a fact directly — saved with [stated] provenance. Also the
+    "💾 Save to memory" button (e.g. pulling one line out of the Lounge)."""
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Memory is empty")
-    return memory_store.add(text, "Chris", kind="chris_stated")
+    entry = memory_store.add(text, "Chris", kind="chris_stated")
+    ledger.append("Chris", "memory_created", ref=entry["id"],
+                  detail={"text": text[:200], "source": "saved by Chris"})
+    return entry
 
 
 @app.delete("/api/memory/{memory_id}")
@@ -1369,6 +1566,11 @@ class WorkshopToggle(BaseModel):
     auto_cycle: bool
 
 
+class WorkshopReanchor(BaseModel):
+    version: int
+    reason: Optional[str] = ""
+
+
 @app.get("/api/workshop")
 async def get_workshop():
     state = workshop_store.load_state()
@@ -1390,13 +1592,16 @@ async def set_workshop_target(body: WorkshopTarget):
     if body.check_mode == "script" and not (body.check_script or "").strip():
         raise HTTPException(status_code=400,
                             detail="Script mode needs a check script — or pick manual judging")
-    target = workshop_store.set_target(body.goal, body.filename or "artifact.txt",
-                                       body.content or "", body.check_mode or "manual",
-                                       body.check_script or "")
-    if not target:
-        raise HTTPException(status_code=400, detail="A goal is required (and the seed must fit)")
-    ledger.append("Chris", "workshop_target_set", ref=target["filename"],
-                  detail={"goal": target["goal"][:200], "check_mode": target["check_mode"]})
+    # Serialize against the background cycle: a target swap mid-cycle could let
+    # a stale save clobber the new target or land an old edit on a fresh chain.
+    async with _workshop_cycle_running:
+        target = workshop_store.set_target(body.goal, body.filename or "artifact.txt",
+                                           body.content or "", body.check_mode or "manual",
+                                           body.check_script or "")
+        if not target:
+            raise HTTPException(status_code=400, detail="A goal is required (and the seed must fit)")
+        ledger.append("Chris", "workshop_target_set", ref=target["filename"],
+                      detail={"goal": target["goal"][:200], "check_mode": target["check_mode"]})
     return target
 
 
@@ -1415,48 +1620,85 @@ async def rule_workshop_version(body: WorkshopRuling):
     ruling locks the seat that wrote it, same as the script judge."""
     if body.status not in ("passed", "failed"):
         raise HTTPException(status_code=400, detail="Ruling must be passed or failed")
-    versions = workshop_store.list_versions(500)
-    entry = next((e for e in versions
-                  if e.get("v") == body.version and not e.get("verdict_for")), None)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Version not found")
-    workshop_store.update_check(body.version, body.status, body.reason or "ruled by Chris")
-    ledger.append("Chris", "workshop_ruled", ref=f"v{body.version}",
-                  detail={"status": body.status, "reason": (body.reason or "")[:200]})
-    pid = _pid_for_name(entry.get("by", ""))
-    if body.status == "failed" and pid:
-        state = workshop_store.load_state()
-        workshop_store.lock_seat(state, pid)
-        workshop_store.save_state(state)
-        ledger.append(entry.get("by", "?"), "workshop_seat_locked", ref=pid,
-                      detail={"reason": "ruled failed by Chris"})
-        receipt_store.issue(pid, "workshop_edit", "rejected",
-                            {"version": body.version, "ruled_by": "Chris",
-                             "reason": (body.reason or "")[:200], "locked_next_cycle": True})
-    elif pid:
-        receipt_store.issue(pid, "workshop_edit", "success",
-                            {"version": body.version, "ruled_by": "Chris"})
+    # Serialize against the cycle so a lock Chris applies here can't be erased
+    # by the cycle's stale save landing a moment later.
+    async with _workshop_cycle_running:
+        versions = workshop_store.list_versions(500)
+        entry = next((e for e in versions
+                      if e.get("v") == body.version and not e.get("verdict_for")), None)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Version not found")
+        workshop_store.update_check(body.version, body.status, body.reason or "ruled by Chris")
+        ledger.append("Chris", "workshop_ruled", ref=f"v{body.version}",
+                      detail={"status": body.status, "reason": (body.reason or "")[:200]})
+        pid = _pid_for_name(entry.get("by", ""))
+        if body.status == "failed" and pid:
+            state = workshop_store.load_state()
+            workshop_store.lock_seat(state, pid)
+            workshop_store.save_state(state)
+            ledger.append(entry.get("by", "?"), "workshop_seat_locked", ref=pid,
+                          detail={"reason": "ruled failed by Chris"})
+            receipt_store.issue(pid, "workshop_edit", "rejected",
+                                {"version": body.version, "ruled_by": "Chris",
+                                 "reason": (body.reason or "")[:200], "locked_next_cycle": True})
+        elif pid:
+            receipt_store.issue(pid, "workshop_edit", "success",
+                                {"version": body.version, "ruled_by": "Chris"})
     return {"version": body.version, "status": body.status}
 
 
 @app.post("/api/workshop/ship")
 async def ship_workshop():
-    target = workshop_store.ship_target()
-    if not target:
-        raise HTTPException(status_code=404, detail="No active target to ship")
-    live = workshop_store.latest_passing()
-    ledger.append("Chris", "workshop_shipped", ref=target["filename"],
-                  detail={"goal": target["goal"][:200],
-                          "final_version": live["v"] if live else 0})
+    async with _workshop_cycle_running:
+        target = workshop_store.ship_target()
+        if not target:
+            raise HTTPException(status_code=404, detail="No active target to ship")
+        live = workshop_store.latest_passing()
+        ledger.append("Chris", "workshop_shipped", ref=target["filename"],
+                      detail={"goal": target["goal"][:200],
+                              "final_version": live["v"] if live else 0})
     return {"target": target, "final_version": live["v"] if live else 0}
 
 
 @app.post("/api/workshop/auto")
 async def toggle_workshop_auto(body: WorkshopToggle):
-    state = workshop_store.load_state()
-    state["auto_cycle"] = bool(body.auto_cycle)
-    workshop_store.save_state(state)
-    return {"auto_cycle": state["auto_cycle"]}
+    async with _workshop_cycle_running:
+        state = workshop_store.load_state()
+        state["auto_cycle"] = bool(body.auto_cycle)
+        workshop_store.save_state(state)
+    return {"auto_cycle": bool(body.auto_cycle)}
+
+
+@app.post("/api/workshop/reanchor")
+async def reanchor_workshop(body: WorkshopReanchor):
+    """Accept a known chain break — append-only, never a rewrite. Only the
+    ACTUAL first break can be re-anchored, so this can't paper over a valid
+    chain or dodge a tampered row."""
+    async with _workshop_cycle_running:
+        before = workshop_store.verify_chain()
+        if before.get("valid"):
+            raise HTTPException(status_code=400, detail="Chain is already valid — nothing to re-anchor")
+        if before.get("first_bad") != body.version:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The first break is at v{before.get('first_bad')}, not v{body.version} — re-anchor the actual break")
+        # A re-anchor forgives ONLY a genuine dangling scar (a broken chain
+        # link with no real parent recorded). Every other break — a tampered
+        # row, altered artifact content, a missing file, or an upstream row
+        # rewrite that pushed the break downstream — is content tampering a
+        # re-anchor must never launder.
+        if before.get("reason") != "broken chain link":
+            raise HTTPException(
+                status_code=400,
+                detail=f"v{body.version}: {before.get('reason')} — that's altered content, not a forgivable broken link; a re-anchor can't paper over it")
+        row = workshop_store.reanchor(body.version, body.reason or "accepted known break", "Chris")
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Version {body.version} not found")
+        ledger.append("Chris", "workshop_reanchored", ref=f"v{body.version}",
+                      detail={"reason": (body.reason or "")[:200],
+                              "accepted_hash": (row.get("accepted_hash") or "")[:16]})
+        after = workshop_store.verify_chain()
+    return {"reanchored": body.version, "chain_before": before, "chain_after": after}
 
 
 @app.get("/api/workshop/versions/{v}")
@@ -1604,6 +1846,45 @@ async def rule_proposal(proposal_id: str, body: ProposalRuling):
                             {"proposal_id": p["id"], "status": p["status"],
                              "seal_held": seal_held})
     return proposal_store.public_view(p)
+
+
+# --- 🎨 The Studio (creative room) -------------------------------------------
+
+class StudioBuild(BaseModel):
+    pitch_id: str
+
+
+@app.get("/api/studio")
+async def get_studio():
+    return studio_store.snapshot()
+
+
+@app.post("/api/studio/build")
+async def build_studio(body: StudioBuild):
+    """Chris builds the winner. Enforces one build a week."""
+    res = studio_store.build(body.pitch_id)
+    if not res["ok"]:
+        raise HTTPException(status_code=400, detail=res["reason"])
+    p = res["pitch"]
+    ledger.append("Chris", "studio_built", ref=p["id"],
+                  detail={"author": p.get("author_name", "?"),
+                          "text": p.get("text", "")[:200]})
+    receipt_store.issue(p.get("author_id", "?"), "studio_built", "success",
+                        {"pitch_id": p["id"],
+                         "note": "Chris is building your pitch — you get to try it first"})
+    return studio_store.snapshot()
+
+
+@app.post("/api/studio/open")
+async def open_studio(body: StudioBuild):
+    """Chris opens a built pitch to the whole room, after its author's first try."""
+    res = studio_store.open_to_room(body.pitch_id)
+    if not res["ok"]:
+        raise HTTPException(status_code=400, detail=res["reason"])
+    p = res["pitch"]
+    ledger.append("Chris", "studio_opened", ref=p["id"],
+                  detail={"author": p.get("author_name", "?")})
+    return studio_store.snapshot()
 
 
 # --- 🎬 Director's Cut --------------------------------------------------------

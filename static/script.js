@@ -20,8 +20,10 @@ async function refreshSessions() {
     const res = await fetch('/api/sessions');
     const data = await res.json();
 
-    sessionSelect.innerHTML = '<option value="new">New Session</option>';
+    sessionSelect.innerHTML = `<option value="new">${loungeMode ? '🛋️ New Lounge chat' : 'New Session'}</option>`;
     for (const s of data.sessions) {
+        // The Living Room and the Lounge each show only their own sessions.
+        if (!!s.lounge !== loungeMode) continue;
         const opt = document.createElement('option');
         opt.value = s.id;
         const preview = s.last_message ? ` — ${s.last_message.slice(0, 40)}` : '';
@@ -180,6 +182,16 @@ deleteBtn.addEventListener('click', async () => {
         alert('Delete failed.');
         return;
     }
+    // If we just deleted the parked Lounge session, forget its stored id so a
+    // later reload doesn't try to restore a session that no longer exists.
+    if (loungeSessionId === currentSessionId) {
+        loungeSessionId = null;
+        localStorage.removeItem('teamtalk-lounge-session');
+    }
+    if (savedBizSession === currentSessionId) {
+        savedBizSession = null;
+        localStorage.removeItem('teamtalk-biz-session');
+    }
     startNewSession();
     await refreshSessions();
 });
@@ -196,6 +208,54 @@ awardsToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-awards', awardsToggle.checked ? 'on' : 'off'));
 splendorToggle.addEventListener('change', () =>
     localStorage.setItem('teamtalk-splendor', splendorToggle.checked ? 'on' : 'off'));
+
+// --- 🛋️ The Lounge: a separate, off-the-record room ------------------------
+// Flip in and the Living Room session is set aside; you're in the Lounge's own
+// conversations, sent with lounge:true (stripped prompt, nothing remembered).
+// Flip out and business resumes exactly where it was.
+const loungeToggle = document.getElementById('lounge-toggle');
+const loungeBanner = document.getElementById('lounge-banner');
+let loungeMode = false;
+let savedBizSession = null;   // the Living Room session, parked while in the Lounge
+let loungeSessionId = localStorage.getItem('teamtalk-lounge-session') || null;
+
+function paintLounge() {
+    document.body.classList.toggle('lounge-active', loungeMode);
+    if (loungeBanner) loungeBanner.hidden = !loungeMode;
+    if (loungeToggle) loungeToggle.checked = loungeMode;
+}
+
+async function switchRoom(toLounge) {
+    if (toLounge) {
+        savedBizSession = currentSessionId;
+        // Park the business session so a reload-then-flip-out returns here
+        // instead of dropping you into a blank new session.
+        localStorage.setItem('teamtalk-biz-session', savedBizSession || '');
+        loungeMode = true;
+        currentSessionId = loungeSessionId;
+    } else {
+        // remember which lounge chat was open for next time
+        if (currentSessionId) {
+            loungeSessionId = currentSessionId;
+            localStorage.setItem('teamtalk-lounge-session', loungeSessionId);
+        }
+        loungeMode = false;
+        currentSessionId = savedBizSession;
+    }
+    // Persist the room so a page reload doesn't silently drop you back into the
+    // Living Room (with everything recording) while you think you're off the record.
+    localStorage.setItem('teamtalk-lounge-mode', loungeMode ? 'on' : 'off');
+    paintLounge();
+    historyDiv.innerHTML = '';
+    if (currentSessionId) {
+        await loadSession(currentSessionId);
+    }
+    await refreshSessions();
+}
+
+if (loungeToggle) {
+    loungeToggle.addEventListener('change', () => switchRoom(loungeToggle.checked));
+}
 
 // --- Voice mode: talk to the room, hear Splendor recap the crew -------------
 
@@ -310,6 +370,7 @@ const MODE_LABELS = {
     ledgers_dream: "🛌 ledger's dream",
     fridge_note: '🧲 fridge note',
     object_theater: '🪨 object theater',
+    ghost_fork: '🪞 ghost fork',
 };
 
 // Modes stack: pick up to 3 at once (e.g. Hard Truth + Roast).
@@ -442,6 +503,7 @@ async function sendMessage() {
                 via_splendor: splendorToggle.checked,
                 room_context: deviceContext(),
                 attachments: sentAttachments.map((a) => a.id),
+                lounge: loungeMode,
             }),
         });
         if (!res.ok) {
@@ -452,6 +514,10 @@ async function sendMessage() {
 
         const isNewSession = !currentSessionId;
         currentSessionId = data.session_id;
+        if (loungeMode) {
+            loungeSessionId = data.session_id;
+            localStorage.setItem('teamtalk-lounge-session', loungeSessionId);
+        }
         chrisInput.value = '';
         pendingAttachments = [];
         renderAttachChips();
@@ -623,6 +689,25 @@ function speakerEl(color, name) {
     return el;
 }
 
+async function saveToMemory(text, btn) {
+    const suggested = (text || '').trim().slice(0, 300);
+    const toSave = prompt('Save to memory — trim it to the fact worth keeping:', suggested);
+    if (toSave === null) return;               // cancelled
+    const clean = toSave.trim();
+    if (!clean) return;
+    try {
+        const res = await fetch('/api/memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: clean }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `failed (${res.status})`);
+        if (btn) { btn.textContent = '✓ Saved to memory'; btn.disabled = true; }
+    } catch (e) {
+        alert('Could not save to memory: ' + e.message);
+    }
+}
+
 function aiBubble(resp, allNames = [], reveal = false) {
     const el = document.createElement('div');
     const isError = (resp.text || '').startsWith('Error:');
@@ -659,6 +744,18 @@ function aiBubble(resp, allNames = [], reveal = false) {
     body.textContent = resp.text || '';
     el.appendChild(body);
 
+    // 💾 Pull this line into long-term memory — the manual save (the only way
+    // anything from the off-the-record Lounge gets kept).
+    if (!isError) {
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'save-mem-btn';
+        saveBtn.title = "Save this to the room's long-term memory";
+        saveBtn.textContent = '💾 Save to memory';
+        saveBtn.addEventListener('click', () => saveToMemory(resp.text || '', saveBtn));
+        el.appendChild(saveBtn);
+    }
+
     if (resp.tokens !== undefined && !isError) {
         const t = document.createElement('span');
         t.className = 'tokens-inline';
@@ -672,6 +769,8 @@ function aiBubble(resp, allNames = [], reveal = false) {
         if (resp.questions_asked) extra += '  ·  ❓ asked Chris a question';
         if (resp.mail_sent) extra += '  ·  📬 left mail';
         if (resp.about_written) extra += '  ·  🪪 updated About Me';
+        if (resp.studio_pitched) extra += '  ·  🎨 pitched to the Studio';
+        if (resp.studio_voted) extra += `  ·  🗳️ voted ${resp.studio_voted}`;
         if (resp.room_actions) {
             const ok = resp.room_actions.filter((a) => a.ok).length;
             const bad = resp.room_actions.length - ok;
@@ -1638,7 +1737,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals', 'studio'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1657,12 +1756,109 @@ function showArea(area) {
     if (area === 'workshop') renderWorkshop();
     if (area === 'night') renderNight();
     if (area === 'proposals') renderProposals();
+    if (area === 'studio') renderStudio();
 }
 
 roomNav.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-area]');
     if (btn) showArea(btn.dataset.area);
 });
+
+// --- 🎨 The Studio (creative room)
+async function renderStudio() {
+    const statusEl = document.getElementById('studio-status');
+    const boardEl = document.getElementById('studio-board');
+    const builtEl = document.getElementById('studio-built');
+    let data;
+    try {
+        const res = await fetch('/api/studio');
+        if (res.status === 404) {
+            statusEl.textContent = 'The Studio needs a server restart — run: sudo systemctl restart team-talk';
+            return;
+        }
+        data = await res.json();
+        if (!res.ok) throw new Error((data && data.detail) || `failed (${res.status})`);
+    } catch (e) {
+        statusEl.textContent = 'Could not load the Studio.';
+        return;
+    }
+    // Defensive defaults so a partial payload never crashes the render.
+    data.board = Array.isArray(data.board) ? data.board : [];
+    data.built = Array.isArray(data.built) ? data.built : [];
+    statusEl.textContent = data.can_build
+        ? '🎨 A build is available this week — build the top pitch below.'
+        : `🎨 This week's build is spent — next build in ${data.cooldown_days} day(s). Keep pitching and voting.`;
+
+    boardEl.innerHTML = data.board.length ? ''
+        : '<p class="empty-hint">No pitches yet. Ask the room to drop a PITCH: line in chat.</p>';
+    for (const p of data.board) {
+        const isLeader = p.id === data.leader_id;
+        const vlist = Array.isArray(p.voters) ? p.voters : [];
+        const voters = vlist.length ? ` · ${escapeText(vlist.join(', '))}` : '';
+        const item = document.createElement('div');
+        item.className = 'memory-item';
+        item.innerHTML =
+            `<div class="memory-text">${isLeader ? '👑 ' : ''}<strong>${escapeText(p.author)}</strong> — ${escapeText(p.text)}</div>` +
+            `<div class="memory-meta">${p.votes} vote${p.votes === 1 ? '' : 's'}${voters} · ${escapeText(p.id)}</div>`;
+        if (data.can_build) {
+            const b = document.createElement('button');
+            b.className = 'primary';
+            b.textContent = isLeader ? '🔨 Build this (winner)' : '🔨 Build this';
+            b.addEventListener('click', () => buildStudio(p.id));
+            item.appendChild(b);
+        }
+        boardEl.appendChild(item);
+    }
+
+    builtEl.innerHTML = data.built.length ? '' : '<p class="field-note">Nothing built yet.</p>';
+    for (const p of data.built) {
+        const item = document.createElement('div');
+        item.className = 'memory-item';
+        const firstTry = p.opened
+            ? `open to the room · pitched by ${escapeText(p.author)}`
+            : `🎁 first try: <strong>${escapeText(p.author)}</strong> — theirs before the room's`;
+        item.innerHTML =
+            `<div class="memory-text">✅ <strong>${escapeText(p.author)}</strong> — ${escapeText(p.text)}</div>` +
+            `<div class="memory-meta">built ${(p.built_at || '').slice(0, 16).replace('T', ' ')} · ${firstTry}</div>`;
+        if (!p.opened) {
+            const o = document.createElement('button');
+            o.textContent = '🔓 Open to the room';
+            o.title = 'Once its author has had first try, open the build to everyone';
+            o.addEventListener('click', () => openStudio(p.id));
+            item.appendChild(o);
+        }
+        builtEl.appendChild(item);
+    }
+}
+
+async function openStudio(pitchId) {
+    try {
+        const res = await fetch('/api/studio/open', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pitch_id: pitchId }),
+        });
+        if (!res.ok) { alert((await res.json().catch(() => ({}))).detail || 'Could not open.'); return; }
+        renderStudio();
+    } catch (e) {
+        alert('Could not reach the room.');
+    }
+}
+
+async function buildStudio(pitchId) {
+    if (!confirm('Make this the build for this week? (One build a week.)')) return;
+    try {
+        const res = await fetch('/api/studio/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pitch_id: pitchId }),
+        });
+        if (!res.ok) { alert((await res.json().catch(() => ({}))).detail || 'Could not build.'); return; }
+        renderStudio();
+    } catch (e) {
+        alert('Could not reach the room.');
+    }
+}
 
 // --- The Foyer Board
 async function renderFoyer() {
@@ -2303,10 +2499,16 @@ document.getElementById('game-turn-btn').addEventListener('click', async () => {
     // queue whatever's typed in the move boxes first
     for (const ta of document.querySelectorAll('#game-moves textarea')) {
         if (ta.value.trim()) {
-            await fetch(`/api/games/${currentGame.id}/move`, {
+            const mres = await fetch(`/api/games/${currentGame.id}/move`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ player: ta.dataset.player, text: ta.value.trim() }),
             });
+            // A dropped move must not be swept into a turn the player thinks counted.
+            if (!mres.ok) {
+                alert((await mres.json().catch(() => ({}))).detail
+                    || 'Your move could not be submitted — try again.');
+                return;
+            }
         }
     }
     btn.disabled = true;
@@ -2730,6 +2932,17 @@ async function init() {
         renderLegend();
     } catch (err) {
         // legend just stays minimal if settings can't load
+    }
+    // Restore the Lounge across reloads — otherwise a refresh silently returns
+    // you to the Living Room and the next messages record with everything on.
+    if (localStorage.getItem('teamtalk-lounge-mode') === 'on') {
+        loungeMode = true;
+        // Restore the parked business session too, so flipping OUT of the
+        // Lounge returns you there instead of a blank new session.
+        savedBizSession = localStorage.getItem('teamtalk-biz-session') || null;
+        currentSessionId = loungeSessionId;
+        paintLounge();
+        if (currentSessionId) { await loadSession(currentSessionId); }
     }
     await refreshSessions();
     chrisInput.focus();

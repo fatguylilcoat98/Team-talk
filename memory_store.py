@@ -14,6 +14,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Tuple
 
+import ledger
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MEMORY_DIR = os.path.join(BASE_DIR, "memory")
 MEMORY_PATH = os.path.join(MEMORY_DIR, "memory.json")
@@ -21,6 +23,7 @@ MEMORY_PATH = os.path.join(MEMORY_DIR, "memory.json")
 MAX_ENTRIES = 500          # oldest entries drop off past this
 CONTEXT_ENTRIES = 40       # how many recent memories each AI sees
 MAX_MEMORY_CHARS = 300     # per saved memory
+MAX_PER_MESSAGE = 2        # memories saved per reply; extras are rejected, not dropped
 
 _MEMORY_LINE = re.compile(r"^[ \t]*MEMORY:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 
@@ -40,6 +43,12 @@ def _load() -> List[dict]:
 
 def _save(entries: List[dict]) -> None:
     os.makedirs(MEMORY_DIR, mode=0o700, exist_ok=True)
+    # Tombstone BEFORE the drop, at the truncation site — so this holds for
+    # every caller (add/delete/clear): the record is written first, then the
+    # truncation happens. (ledger.append is best-effort — on a ledger I/O
+    # failure it logs rather than raising, so in that rare case the drop can
+    # still proceed unrecorded; the common path always records first.)
+    _record_evictions(entries)
     tmp = f"{MEMORY_PATH}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(entries[-MAX_ENTRIES:], f, indent=2, ensure_ascii=False)
@@ -48,6 +57,27 @@ def _save(entries: List[dict]) -> None:
 
 def list_memories() -> List[dict]:
     return _load()
+
+
+def _record_evictions(entries: List[dict]) -> None:
+    """Before the cap truncates the list, leave a ledger tombstone for every
+    entry it will drop — so nothing vanishes silently (the room's own rule).
+    The content already rode into the ledger at creation; this records that it
+    aged out of active memory, which was the hole in the glass box's floor."""
+    overflow = len(entries) - MAX_ENTRIES
+    for e in entries[:max(0, overflow)]:
+        already = e.get("tombstone")
+        ledger.append(
+            e.get("original_by") or e.get("by") or "system",
+            "memory_tombstone_evicted" if already else "memory_evicted",
+            ref=e.get("id") or "",
+            detail={
+                "reason": f"aged out at the {MAX_ENTRIES}-memory cap",
+                "text": (e.get("text") or "")[:200],
+                "kind": e.get("kind"),
+                "created_at": e.get("created_at") or e.get("original_created_at"),
+            },
+        )
 
 
 def add(text: str, by: str, kind: str = "ai_observed") -> dict:
@@ -59,7 +89,7 @@ def add(text: str, by: str, kind: str = "ai_observed") -> dict:
              "created_at": _now()}
     entries = _load()
     entries.append(entry)
-    _save(entries)
+    _save(entries)   # _save records evictions before it drops anything
     return entry
 
 
@@ -110,7 +140,9 @@ def extract_memories(text: str) -> Tuple[str, List[str]]:
         return text, []
     cleaned = _MEMORY_LINE.sub("", text)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, memories[:2]  # max 2 per message, as instructed
+    # Return ALL found — the caller keeps MAX_PER_MESSAGE and issues a rejected
+    # receipt for the rest, so an over-cap memory doesn't vanish silently.
+    return cleaned, memories
 
 
 def context_block() -> str:

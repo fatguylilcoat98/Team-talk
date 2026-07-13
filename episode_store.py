@@ -14,6 +14,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
+import ledger
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EPISODES_DIR = os.path.join(BASE_DIR, "memory")
 EPISODES_PATH = os.path.join(EPISODES_DIR, "episodes.json")
@@ -39,6 +41,11 @@ def _load() -> List[dict]:
 
 def _save(episodes: List[dict]) -> None:
     os.makedirs(EPISODES_DIR, mode=0o700, exist_ok=True)
+    for e in episodes[:max(0, len(episodes) - MAX_EPISODES)]:
+        if not e.get("tombstone"):
+            ledger.append("system", "episode_evicted", ref=e.get("id") or "",
+                          detail={"reason": f"aged out at the {MAX_EPISODES} cap",
+                                  "text": (e.get("summary") or "")[:200]})
     tmp = f"{EPISODES_PATH}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(episodes[-MAX_EPISODES:], f, indent=2, ensure_ascii=False)
@@ -94,7 +101,10 @@ def pending_chunk(session_id: str, rounds: List[dict], keep_recent: int) -> Opti
     """
     aged_out = rounds[:-keep_recent] if len(rounds) > keep_recent else []
     done = covered_until(session_id)
-    todo = [r for r in aged_out if (r.get("round") or 0) > done]
+    # 🪞 Ghost Fork rounds evaporate — they never become permanent episodic
+    # memory, so they're excluded from every compression chunk.
+    todo = [r for r in aged_out
+            if (r.get("round") or 0) > done and not r.get("ghost_fork")]
     if len(todo) < MIN_CHUNK:
         return None
     return todo[:CHUNK_ROUNDS]

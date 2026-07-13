@@ -16,6 +16,8 @@ import json
 import os
 import re
 import uuid
+
+import ledger
 from datetime import datetime, timezone
 from typing import List, Tuple
 
@@ -29,6 +31,8 @@ CONTEXT_ENTRIES = 25       # recent notebook entries each AI sees
 CONTEXT_PINS = 20
 MAX_ENTRY_CHARS = 500
 MAX_PIN_CHARS = 300
+MAX_ENTRIES_PER_MSG = 3    # notebook entries per reply; extras are rejected, not dropped
+MAX_PINS_PER_MSG = 2       # pins per reply; extras are rejected, not dropped
 
 _NOTEBOOK_LINE = re.compile(r"^[ \t]*NOTEBOOK:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 _PIN_LINE = re.compile(r"^[ \t]*PIN:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
@@ -52,8 +56,23 @@ def _load() -> dict:
     }
 
 
+def _ledger_evicted(items: list, cap: int, action: str) -> None:
+    """Record every live item the cap is about to drop — nothing vanishes
+    silently (the room's rule)."""
+    for e in items[:max(0, len(items) - cap)]:
+        already = e.get("tombstone")
+        # Even a tombstone aging off the cap gets a record — otherwise the
+        # "nothing vanishes silently" contract has a hole right at the floor.
+        ledger.append(e.get("by") or "system", action, ref=e.get("id") or "",
+                      detail={"reason": f"aged out at the {cap} cap"
+                              + (" (was already a tombstone)" if already else ""),
+                              "text": (e.get("text") or e.get("summary") or "")[:200]})
+
+
 def _save(data: dict) -> None:
     os.makedirs(NOTEBOOK_DIR, mode=0o700, exist_ok=True)
+    _ledger_evicted(data["entries"], MAX_ENTRIES, "notebook_entry_evicted")
+    _ledger_evicted(data["pins"], MAX_PINS, "pin_evicted")
     data = {
         "entries": data["entries"][-MAX_ENTRIES:],
         "pins": data["pins"][-MAX_PINS:],
@@ -149,7 +168,9 @@ def extract(text: str) -> Tuple[str, List[str], List[str]]:
     cleaned = _NOTEBOOK_LINE.sub("", text)
     cleaned = _PIN_LINE.sub("", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, entries[:3], pins[:2]
+    # Return ALL found — the caller keeps the per-message caps and rejects the
+    # rest with a receipt, so over-cap notes/pins don't vanish silently.
+    return cleaned, entries, pins
 
 
 def context_block() -> str:
