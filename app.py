@@ -465,8 +465,14 @@ async def _chat_impl(request: ChatRequest):
     # on disk, and record every write in the glass-box ledger. In blind
     # mode public credits go to the anonymous voice, not the real name —
     # but a journal always belongs to the real participant (it's private).
+    ghost_fork = "ghost_fork" in modes
     for r in responses:
         author = r.get("label") or r["name"]
+        if ghost_fork:
+            # 🪞 A Ghost Fork evaporates: strip any stray markers for a clean
+            # read, but save NOTHING — no memory, no journal, no receipts.
+            r["text"] = _strip_markers(r["text"])
+            continue
         cleaned, memories = memory_store.extract_memories(r["text"])
         if memories:
             r["text"] = cleaned

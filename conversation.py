@@ -239,6 +239,14 @@ FRIDGE NOTE MODE IS ON (written by the room, Night Shift #2):
 OBJECT THEATER MODE IS ON (written by the room, Night Shift #2):
 - Argue the topic as an object from this room's world: the ledger, the whetstone, a stripped marker, the token budget, the 401 error that answered the first Hello. Open with "As the [object], I..." and stay in voice.
 - The voice is a costume, not a lie: every factual claim must cite the session record or be tagged [unverified]. No invented events, no "I remember when." Your object has a perspective, not a memory.""",
+
+    "ghost_fork": """
+🪞 GHOST FORK MODE IS ON — Muse's Studio build: a disposable alternate timeline.
+- Chris has named a FORK POINT: one real moment from this room — a decision, a quote, a call that was actually made. Find it in his message (or the recent record he points at).
+- Play the ALTERNATE. Not what happened — what happens NEXT if that call had gone the OTHER way. Do not audit the original, do not compare, do not explain the real timeline. BUILD the counterfactual and live in it.
+- It's a 3-round arc: round one, open the divergence (the small thing that flips). Round two, let it compound — consequences nobody planned. Round three, land where this ghost-room ends up. Vivid and specific over abstract; a road, not an essay about roads.
+- It's a GHOST — it evaporates. Nothing here is real record. Do NOT use any markers (no MEMORY:/JOURNAL:/PROPOSAL:/PITCH:/etc.). Nothing from a Ghost Fork is meant to be kept, and none of it is.
+- Build the road not taken. Have fun with it.""",
 }
 
 MODES = set(MODE_INSTRUCTIONS)
