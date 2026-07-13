@@ -39,6 +39,13 @@ def extract_and_apply(text: str, actor: str, session_id: str) -> Tuple[str, List
             ledger.append(actor, "room_action_rejected", detail={"reason": "invalid JSON"})
             continue
         results.append(_apply(payload, actor, session_id))
+    # Actions past the per-message cap are rejected on the record — never
+    # stripped and silently dropped (the room's "no pretending" contract).
+    for _ in matches[MAX_PER_MESSAGE:]:
+        results.append({"action": "over_cap", "ok": False,
+                        "detail": f"dropped — over the {MAX_PER_MESSAGE} room-actions-per-message limit"})
+        ledger.append(actor, "room_action_rejected",
+                      detail={"reason": f"over the {MAX_PER_MESSAGE}-per-message limit"})
     cleaned = _ACTION_LINE.sub("", text)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
     return cleaned, results

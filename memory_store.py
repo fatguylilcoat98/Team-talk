@@ -23,6 +23,7 @@ MEMORY_PATH = os.path.join(MEMORY_DIR, "memory.json")
 MAX_ENTRIES = 500          # oldest entries drop off past this
 CONTEXT_ENTRIES = 40       # how many recent memories each AI sees
 MAX_MEMORY_CHARS = 300     # per saved memory
+MAX_PER_MESSAGE = 2        # memories saved per reply; extras are rejected, not dropped
 
 _MEMORY_LINE = re.compile(r"^[ \t]*MEMORY:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 
@@ -134,7 +135,9 @@ def extract_memories(text: str) -> Tuple[str, List[str]]:
         return text, []
     cleaned = _MEMORY_LINE.sub("", text)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, memories[:2]  # max 2 per message, as instructed
+    # Return ALL found — the caller keeps MAX_PER_MESSAGE and issues a rejected
+    # receipt for the rest, so an over-cap memory doesn't vanish silently.
+    return cleaned, memories
 
 
 def context_block() -> str:

@@ -396,36 +396,51 @@ async def _chat_impl(request: ChatRequest):
         cleaned, memories = memory_store.extract_memories(r["text"])
         if memories:
             r["text"] = cleaned
-            for m in memories:
+            kept = memories[:memory_store.MAX_PER_MESSAGE]
+            for m in kept:
                 entry = memory_store.add(m, author)
                 ledger.append(author, "memory_created", ref=entry["id"],
                               detail={"text": m[:200]})
                 receipt_store.issue(r["id"], "save_memory", "success",
                                     {"memory_id": entry["id"]})
-            r["memories_saved"] = len(memories)
+            # Over-cap memories get a ✗ REJECTED receipt, not a silent drop.
+            for _ in memories[memory_store.MAX_PER_MESSAGE:]:
+                receipt_store.issue(r["id"], "save_memory", "rejected",
+                                    {"reason": f"over the {memory_store.MAX_PER_MESSAGE}-memory-per-message limit — not saved"})
+            r["memories_saved"] = len(kept)
         cleaned, notes_saved, pins_saved = notebook_store.extract(r["text"])
         if notes_saved or pins_saved:
             r["text"] = cleaned
-            for n in notes_saved:
+            kept_notes = notes_saved[:notebook_store.MAX_ENTRIES_PER_MSG]
+            kept_pins = pins_saved[:notebook_store.MAX_PINS_PER_MSG]
+            for n in kept_notes:
                 entry = notebook_store.add_entry(n, author)
                 ledger.append(author, "notebook_written", ref=entry["id"],
                               detail={"text": n[:200]})
                 receipt_store.issue(r["id"], "notebook_write", "success",
                                     {"entry_id": entry["id"]})
-            for q in pins_saved:
+            for q in kept_pins:
                 pin = notebook_store.add_pin(q, author)
                 ledger.append(author, "pin_created", ref=pin["id"],
                               detail={"quote": q[:200]})
                 receipt_store.issue(r["id"], "pin_quote", "success",
                                     {"pin_id": pin["id"]})
-            if notes_saved:
-                r["notebook_saved"] = len(notes_saved)
-            if pins_saved:
-                r["pins_saved"] = len(pins_saved)
+            # Over-cap notes/pins get a ✗ REJECTED receipt, not a silent drop.
+            for _ in notes_saved[notebook_store.MAX_ENTRIES_PER_MSG:]:
+                receipt_store.issue(r["id"], "notebook_write", "rejected",
+                                    {"reason": f"over the {notebook_store.MAX_ENTRIES_PER_MSG}-note-per-message limit — not saved"})
+            for _ in pins_saved[notebook_store.MAX_PINS_PER_MSG:]:
+                receipt_store.issue(r["id"], "pin_quote", "rejected",
+                                    {"reason": f"over the {notebook_store.MAX_PINS_PER_MSG}-pin-per-message limit — not saved"})
+            if kept_notes:
+                r["notebook_saved"] = len(kept_notes)
+            if kept_pins:
+                r["pins_saved"] = len(kept_pins)
         cleaned, journal_entries = journal_store.extract(r["text"])
         if journal_entries:
             r["text"] = cleaned
-            for j in journal_entries:
+            kept_journal = journal_entries[:journal_store.MAX_PER_MESSAGE]
+            for j in kept_journal:
                 entry = journal_store.write(
                     r["id"], r["name"], session["id"], j["note"],
                     intent=j["intent"], recognized=j["recognized"],
@@ -439,7 +454,11 @@ async def _chat_impl(request: ChatRequest):
                     receipt_store.issue(r["id"], "journal_write", "success",
                                         {"version": entry["version"],
                                          "hash": entry["hash"][:12]})
-            r["journal_saved"] = len(journal_entries)
+            # Over-cap journal entries get a ✗ REJECTED receipt, not a silent drop.
+            for _ in journal_entries[journal_store.MAX_PER_MESSAGE:]:
+                receipt_store.issue(r["id"], "journal_write", "rejected",
+                                    {"reason": f"over the {journal_store.MAX_PER_MESSAGE}-journal-per-message limit — not saved"})
+            r["journal_saved"] = len(kept_journal)
         cleaned, asked = questions_store.extract(r["text"])
         if asked:
             r["text"] = cleaned
@@ -551,7 +570,8 @@ async def _chat_impl(request: ChatRequest):
                         "success" if a.get("ok") else "rejected",
                         {"result": a.get("detail", "")})
 
-    ok_count = sum(1 for r in responses if not r["text"].startswith("Error:"))
+    ok_count = sum(1 for r in responses
+                   if r.get("ok", not r["text"].startswith("Error:")))
     if ok_count == len(responses):
         status = "success"
     elif ok_count:
@@ -658,6 +678,10 @@ def _response_entry(p: dict, result: dict, label: Optional[str] = None) -> dict:
         "name": p["name"],
         "text": result["text"],
         "tokens": result["tokens"],
+        # The structured truth of whether the call succeeded — so downstream
+        # never has to guess from an "Error:" text prefix (a real reply that
+        # happens to open with that word used to be miscounted and hidden).
+        "ok": bool(result.get("ok", True)),
         "color": p.get("color", "#93a0b8"),
     }
     if label:
@@ -1414,13 +1438,16 @@ async def set_workshop_target(body: WorkshopTarget):
     if body.check_mode == "script" and not (body.check_script or "").strip():
         raise HTTPException(status_code=400,
                             detail="Script mode needs a check script — or pick manual judging")
-    target = workshop_store.set_target(body.goal, body.filename or "artifact.txt",
-                                       body.content or "", body.check_mode or "manual",
-                                       body.check_script or "")
-    if not target:
-        raise HTTPException(status_code=400, detail="A goal is required (and the seed must fit)")
-    ledger.append("Chris", "workshop_target_set", ref=target["filename"],
-                  detail={"goal": target["goal"][:200], "check_mode": target["check_mode"]})
+    # Serialize against the background cycle: a target swap mid-cycle could let
+    # a stale save clobber the new target or land an old edit on a fresh chain.
+    async with _workshop_cycle_running:
+        target = workshop_store.set_target(body.goal, body.filename or "artifact.txt",
+                                           body.content or "", body.check_mode or "manual",
+                                           body.check_script or "")
+        if not target:
+            raise HTTPException(status_code=400, detail="A goal is required (and the seed must fit)")
+        ledger.append("Chris", "workshop_target_set", ref=target["filename"],
+                      detail={"goal": target["goal"][:200], "check_mode": target["check_mode"]})
     return target
 
 
@@ -1439,48 +1466,53 @@ async def rule_workshop_version(body: WorkshopRuling):
     ruling locks the seat that wrote it, same as the script judge."""
     if body.status not in ("passed", "failed"):
         raise HTTPException(status_code=400, detail="Ruling must be passed or failed")
-    versions = workshop_store.list_versions(500)
-    entry = next((e for e in versions
-                  if e.get("v") == body.version and not e.get("verdict_for")), None)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Version not found")
-    workshop_store.update_check(body.version, body.status, body.reason or "ruled by Chris")
-    ledger.append("Chris", "workshop_ruled", ref=f"v{body.version}",
-                  detail={"status": body.status, "reason": (body.reason or "")[:200]})
-    pid = _pid_for_name(entry.get("by", ""))
-    if body.status == "failed" and pid:
-        state = workshop_store.load_state()
-        workshop_store.lock_seat(state, pid)
-        workshop_store.save_state(state)
-        ledger.append(entry.get("by", "?"), "workshop_seat_locked", ref=pid,
-                      detail={"reason": "ruled failed by Chris"})
-        receipt_store.issue(pid, "workshop_edit", "rejected",
-                            {"version": body.version, "ruled_by": "Chris",
-                             "reason": (body.reason or "")[:200], "locked_next_cycle": True})
-    elif pid:
-        receipt_store.issue(pid, "workshop_edit", "success",
-                            {"version": body.version, "ruled_by": "Chris"})
+    # Serialize against the cycle so a lock Chris applies here can't be erased
+    # by the cycle's stale save landing a moment later.
+    async with _workshop_cycle_running:
+        versions = workshop_store.list_versions(500)
+        entry = next((e for e in versions
+                      if e.get("v") == body.version and not e.get("verdict_for")), None)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Version not found")
+        workshop_store.update_check(body.version, body.status, body.reason or "ruled by Chris")
+        ledger.append("Chris", "workshop_ruled", ref=f"v{body.version}",
+                      detail={"status": body.status, "reason": (body.reason or "")[:200]})
+        pid = _pid_for_name(entry.get("by", ""))
+        if body.status == "failed" and pid:
+            state = workshop_store.load_state()
+            workshop_store.lock_seat(state, pid)
+            workshop_store.save_state(state)
+            ledger.append(entry.get("by", "?"), "workshop_seat_locked", ref=pid,
+                          detail={"reason": "ruled failed by Chris"})
+            receipt_store.issue(pid, "workshop_edit", "rejected",
+                                {"version": body.version, "ruled_by": "Chris",
+                                 "reason": (body.reason or "")[:200], "locked_next_cycle": True})
+        elif pid:
+            receipt_store.issue(pid, "workshop_edit", "success",
+                                {"version": body.version, "ruled_by": "Chris"})
     return {"version": body.version, "status": body.status}
 
 
 @app.post("/api/workshop/ship")
 async def ship_workshop():
-    target = workshop_store.ship_target()
-    if not target:
-        raise HTTPException(status_code=404, detail="No active target to ship")
-    live = workshop_store.latest_passing()
-    ledger.append("Chris", "workshop_shipped", ref=target["filename"],
-                  detail={"goal": target["goal"][:200],
-                          "final_version": live["v"] if live else 0})
+    async with _workshop_cycle_running:
+        target = workshop_store.ship_target()
+        if not target:
+            raise HTTPException(status_code=404, detail="No active target to ship")
+        live = workshop_store.latest_passing()
+        ledger.append("Chris", "workshop_shipped", ref=target["filename"],
+                      detail={"goal": target["goal"][:200],
+                              "final_version": live["v"] if live else 0})
     return {"target": target, "final_version": live["v"] if live else 0}
 
 
 @app.post("/api/workshop/auto")
 async def toggle_workshop_auto(body: WorkshopToggle):
-    state = workshop_store.load_state()
-    state["auto_cycle"] = bool(body.auto_cycle)
-    workshop_store.save_state(state)
-    return {"auto_cycle": state["auto_cycle"]}
+    async with _workshop_cycle_running:
+        state = workshop_store.load_state()
+        state["auto_cycle"] = bool(body.auto_cycle)
+        workshop_store.save_state(state)
+    return {"auto_cycle": bool(body.auto_cycle)}
 
 
 @app.get("/api/workshop/versions/{v}")

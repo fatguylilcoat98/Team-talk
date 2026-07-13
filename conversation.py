@@ -508,14 +508,17 @@ def build_context(
                 opened += f" — {_dur(age)} ago"
             lines.append(opened + ".)")
     shown = rounds
-    if len(rounds) > SHORT_TERM_ROUNDS:
+    # Only drop older rounds from the verbatim window once there's an episode
+    # to carry them. Trimming before the first episode exists (rounds aged out
+    # of the window but too few to compress yet) orphaned the opening round —
+    # invisible to everyone until enough rounds aged out to trigger compression.
+    if len(rounds) > SHORT_TERM_ROUNDS and episodes_block:
         shown = rounds[-SHORT_TERM_ROUNDS:]
         lines.append(
             f"(Showing the last {SHORT_TERM_ROUNDS} of {len(rounds)} rounds — "
             f"rely on long-term memory for older context.)"
         )
-        if episodes_block:
-            lines.append(episodes_block)
+        lines.append(episodes_block)
     prev_dt = None
     for r in shown:
         dt = _parse_ts(r.get("timestamp"))
@@ -597,7 +600,12 @@ def _last_responses(rounds: List[dict], others: List[str]) -> List[str]:
             name = resp.get("label") or resp.get("name")
             if name in others and name not in found:
                 text = resp.get("text", "")
-                if text and not text.startswith("Error:"):
+                # Prefer the structured ok flag; fall back to the text sniff for
+                # rounds saved before the flag existed.
+                ok = resp.get("ok")
+                if ok is None:
+                    ok = not text.startswith("Error:")
+                if text and ok:
                     found[name] = text
         if len(found) == len(others):
             break

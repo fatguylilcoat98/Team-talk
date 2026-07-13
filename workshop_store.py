@@ -23,6 +23,8 @@ import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
+import ledger
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSHOP_DIR = os.path.join(BASE_DIR, "workshop")
 STATE_PATH = os.path.join(WORKSHOP_DIR, "state.json")
@@ -189,6 +191,17 @@ def update_check(v: int, status: str, output: str) -> None:
     chain = _read_chain()
     if not any(e.get("v") == v for e in chain):
         return
+    # A later verdict on the same version silently superseded an earlier one in
+    # latest_passing() (last-in-file-order wins). Re-ruling is legitimate, but
+    # it must be on the record — otherwise a "passed" can quietly become
+    # "failed" with no trace, the same silent-eviction hole as the memory cap.
+    prior = [e for e in chain if e.get("verdict_for") == v]
+    if prior:
+        old_status = (prior[-1].get("check") or {}).get("status")
+        if old_status != str(status)[:20]:
+            ledger.append("Chris", "workshop_verdict_overridden", ref=f"v{v}",
+                          detail={"from": old_status, "to": str(status)[:20],
+                                  "note": "a later verdict supersedes the earlier one on this version"})
     entry = {
         "v": v, "ts": _now(), "by": "Chris",
         "verdict_for": v,

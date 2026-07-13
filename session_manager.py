@@ -175,7 +175,12 @@ def export_html(session: dict) -> str:
             color = esc(resp.get("color", "#888888"))
             persona = resp.get("persona")
             persona_html = f'<span class="persona">🎭 {esc(persona)}</span>' if persona else ""
-            err = ' style="color:#b03030"' if str(resp.get("text", "")).startswith("Error:") else ""
+            # Prefer the structured ok flag; fall back to the text sniff for
+            # rounds saved before the flag existed.
+            _ok = resp.get("ok")
+            if _ok is None:
+                _ok = not str(resp.get("text", "")).startswith("Error:")
+            err = '' if _ok else ' style="color:#b03030"'
             # Blind rounds stay anonymous in the share page too
             shown_name = resp.get("label") or resp.get("name", "AI")
             parts.append(

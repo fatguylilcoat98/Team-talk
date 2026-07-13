@@ -31,6 +31,8 @@ CONTEXT_ENTRIES = 25       # recent notebook entries each AI sees
 CONTEXT_PINS = 20
 MAX_ENTRY_CHARS = 500
 MAX_PIN_CHARS = 300
+MAX_ENTRIES_PER_MSG = 3    # notebook entries per reply; extras are rejected, not dropped
+MAX_PINS_PER_MSG = 2       # pins per reply; extras are rejected, not dropped
 
 _NOTEBOOK_LINE = re.compile(r"^[ \t]*NOTEBOOK:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 _PIN_LINE = re.compile(r"^[ \t]*PIN:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
@@ -164,7 +166,9 @@ def extract(text: str) -> Tuple[str, List[str], List[str]]:
     cleaned = _NOTEBOOK_LINE.sub("", text)
     cleaned = _PIN_LINE.sub("", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, entries[:3], pins[:2]
+    # Return ALL found — the caller keeps the per-message caps and rejects the
+    # rest with a receipt, so over-cap notes/pins don't vanish silently.
+    return cleaned, entries, pins
 
 
 def context_block() -> str:

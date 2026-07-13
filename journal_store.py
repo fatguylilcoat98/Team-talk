@@ -181,7 +181,9 @@ def extract(text: str) -> Tuple[str, List[dict]]:
         return text, []
     cleaned = _JOURNAL_LINE.sub("", text)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned, found[:MAX_PER_MESSAGE]
+    # Return ALL found — the caller keeps MAX_PER_MESSAGE and rejects the rest
+    # with a receipt, so an over-cap journal entry doesn't vanish silently.
+    return cleaned, found
 
 
 def boot_block(participant_id: str, name: str) -> str:
