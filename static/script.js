@@ -755,6 +755,8 @@ function aiBubble(resp, allNames = [], reveal = false) {
         if (resp.questions_asked) extra += '  ·  ❓ asked Chris a question';
         if (resp.mail_sent) extra += '  ·  📬 left mail';
         if (resp.about_written) extra += '  ·  🪪 updated About Me';
+        if (resp.studio_pitched) extra += '  ·  🎨 pitched to the Studio';
+        if (resp.studio_voted) extra += `  ·  🗳️ voted ${escapeText(resp.studio_voted)}`;
         if (resp.room_actions) {
             const ok = resp.room_actions.filter((a) => a.ok).length;
             const bad = resp.room_actions.length - ok;

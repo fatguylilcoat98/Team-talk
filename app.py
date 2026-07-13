@@ -626,14 +626,18 @@ async def _chat_impl(request: ChatRequest):
                 receipt_store.issue(r["id"], "studio_pitch", "success",
                                     {"pitch_id": p["id"],
                                      "note": "replaced your prior pitch" if res["replaced"] else "on the board"})
+                r["studio_pitched"] = True
             for _ in pitches[1:]:
                 receipt_store.issue(r["id"], "studio_pitch", "rejected",
                                     {"reason": "one favorite pitch per message — keep only your best"})
-            for pid in votes[:1]:              # one vote per message
-                vres = studio_store.vote(r["id"], author, pid)
+            for ref in votes[:1]:              # one vote per message
+                vres = studio_store.vote(r["id"], author, ref)
                 if vres["ok"]:
-                    ledger.append(author, "studio_vote", ref=pid, detail={})
-                    receipt_store.issue(r["id"], "studio_vote", "success", {"pitch_id": pid})
+                    ledger.append(author, "studio_vote", ref=vres["pitch"]["id"], detail={})
+                    receipt_store.issue(r["id"], "studio_vote", "success",
+                                        {"pitch_id": vres["pitch"]["id"],
+                                         "for": vres["pitch"].get("author_name", "?")})
+                    r["studio_voted"] = vres["pitch"].get("author_name", "?")
                 else:
                     receipt_store.issue(r["id"], "studio_vote", "rejected", {"reason": vres["reason"]})
             for _ in votes[1:]:

@@ -29,7 +29,10 @@ MAX_PITCH = 500
 BUILD_COOLDOWN_DAYS = 7      # one build a week
 
 _PITCH_LINE = re.compile(r"^[ \t]*PITCH:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
-_VOTE_LINE = re.compile(r"^[ \t]*VOTE:[ \t]*([A-Za-z0-9_]+)[ \t]*$", re.MULTILINE)
+# Lenient on purpose: seats vote by pitch id OR by author name, often with
+# trailing words ("VOTE: Grok - Contradiction Choir"). Capture the rest and
+# resolve it in _resolve_pitch.
+_VOTE_LINE = re.compile(r"^[ \t]*VOTE:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 
 
 def _now() -> str:
@@ -105,13 +108,33 @@ def add_pitch(author_id: str, author_name: str, text: str) -> dict:
     return {"pitch": pitch, "replaced": replaced}
 
 
-def vote(voter_id: str, voter_name: str, pitch_id: str) -> dict:
-    """One vote per voter, moved on re-vote, never for your own pitch.
-    Returns {"ok", "reason"|"pitch"}."""
+def _resolve_pitch(items: List[dict], ref: str) -> Optional[dict]:
+    """Resolve a vote target from a pitch id OR an author name (with any
+    trailing words), so 'st_ab12', 'Grok', and 'Grok - Contradiction Choir'
+    all find Grok's open pitch."""
+    ref = (ref or "").strip()
+    openp = [p for p in items if p.get("status") == "open"]
+    for p in openp:                       # exact id first
+        if p.get("id") == ref:
+            return p
+    low = ref.lower()
+    best = None
+    for p in openp:                       # then by author name appearing in the ref
+        name = (p.get("author_name") or "").lower()
+        if name and (low == name or low.startswith(name) or name in low):
+            if best is None or len(name) > len(best.get("author_name") or ""):
+                best = p
+    return best
+
+
+def vote(voter_id: str, voter_name: str, ref: str) -> dict:
+    """One vote per voter, moved on re-vote, never for your own pitch. Accepts
+    a pitch id or an author name. Returns {"ok", "reason"|"pitch"}."""
     items = _load()
-    target = next((p for p in items if p.get("id") == pitch_id and p.get("status") == "open"), None)
+    target = _resolve_pitch(items, ref)
     if target is None:
-        return {"ok": False, "reason": "no open pitch with that id"}
+        return {"ok": False,
+                "reason": f"no open pitch matches '{str(ref)[:40]}' — vote by the pitch id or the author's name"}
     if target.get("author_id") == voter_id:
         return {"ok": False, "reason": "you can't vote for your own pitch — champion someone else's"}
     # clear any prior vote by this voter (one vote, movable)
