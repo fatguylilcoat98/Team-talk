@@ -257,6 +257,17 @@ def verify_chain() -> dict:
             return {"valid": False, "length": len(entries), "first_bad": None,
                     "reanchored": sorted(reanchors)}
         v = e.get("v")
+        # The chain protects row METADATA, but the thing the Workshop gatekeeps
+        # is the artifact CONTENT. Re-hash the actual v{n}.txt on disk and hold
+        # it against the row's content_hash — otherwise the file can be swapped
+        # under a still-"valid" chain. Not re-anchorable: it's altered content.
+        disk = read_version(v)
+        if disk is None:
+            return {"valid": False, "length": len(entries), "first_bad": v,
+                    "reason": "artifact file missing", "reanchored": sorted(reanchors)}
+        if _sha(disk) != e.get("content_hash"):
+            return {"valid": False, "length": len(entries), "first_bad": v,
+                    "reason": "artifact content altered", "reanchored": sorted(reanchors)}
         expected = version_hash(v or 0, e.get("ts", ""), e.get("by", ""),
                                 e.get("content_hash", ""),
                                 e.get("check", {}).get("status", ""), e.get("prev_hash", ""))
@@ -269,6 +280,18 @@ def verify_chain() -> dict:
             if reanchors.get(v) == e.get("hash"):
                 prev = e["hash"]     # accepted re-root from this version onward
                 continue
+            # Distinguish the genuine historical scar from laundered tampering.
+            # A DANGLING row (empty/GENESIS prev_hash — no real parent recorded,
+            # like the verdict-row bug that first broke the chain) is the real
+            # break, and re-anchorable. But a prev_hash that NAMES a real parent
+            # which no longer matches the actual predecessor means an UPSTREAM
+            # content row was rewritten (its own hash recomputed to stay
+            # self-consistent, pushing the break one row down). Re-anchoring here
+            # would forgive that tamper — so it is NOT re-anchorable.
+            ph = e.get("prev_hash") or ""
+            if ph and ph != GENESIS:
+                return {"valid": False, "length": len(entries), "first_bad": v,
+                        "reason": "upstream row altered", "reanchored": sorted(reanchors)}
             return {"valid": False, "length": len(entries), "first_bad": v,
                     "reason": "broken chain link", "reanchored": sorted(reanchors)}
         prev = e["hash"]

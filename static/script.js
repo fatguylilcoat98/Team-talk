@@ -182,6 +182,16 @@ deleteBtn.addEventListener('click', async () => {
         alert('Delete failed.');
         return;
     }
+    // If we just deleted the parked Lounge session, forget its stored id so a
+    // later reload doesn't try to restore a session that no longer exists.
+    if (loungeSessionId === currentSessionId) {
+        loungeSessionId = null;
+        localStorage.removeItem('teamtalk-lounge-session');
+    }
+    if (savedBizSession === currentSessionId) {
+        savedBizSession = null;
+        localStorage.removeItem('teamtalk-biz-session');
+    }
     startNewSession();
     await refreshSessions();
 });
@@ -218,6 +228,9 @@ function paintLounge() {
 async function switchRoom(toLounge) {
     if (toLounge) {
         savedBizSession = currentSessionId;
+        // Park the business session so a reload-then-flip-out returns here
+        // instead of dropping you into a blank new session.
+        localStorage.setItem('teamtalk-biz-session', savedBizSession || '');
         loungeMode = true;
         currentSessionId = loungeSessionId;
     } else {
@@ -357,6 +370,7 @@ const MODE_LABELS = {
     ledgers_dream: "🛌 ledger's dream",
     fridge_note: '🧲 fridge note',
     object_theater: '🪨 object theater',
+    ghost_fork: '🪞 ghost fork',
 };
 
 // Modes stack: pick up to 3 at once (e.g. Hard Truth + Roast).
@@ -756,7 +770,7 @@ function aiBubble(resp, allNames = [], reveal = false) {
         if (resp.mail_sent) extra += '  ·  📬 left mail';
         if (resp.about_written) extra += '  ·  🪪 updated About Me';
         if (resp.studio_pitched) extra += '  ·  🎨 pitched to the Studio';
-        if (resp.studio_voted) extra += `  ·  🗳️ voted ${escapeText(resp.studio_voted)}`;
+        if (resp.studio_voted) extra += `  ·  🗳️ voted ${resp.studio_voted}`;
         if (resp.room_actions) {
             const ok = resp.room_actions.filter((a) => a.ok).length;
             const bad = resp.room_actions.length - ok;
@@ -1758,11 +1772,19 @@ async function renderStudio() {
     let data;
     try {
         const res = await fetch('/api/studio');
+        if (res.status === 404) {
+            statusEl.textContent = 'The Studio needs a server restart — run: sudo systemctl restart team-talk';
+            return;
+        }
         data = await res.json();
+        if (!res.ok) throw new Error((data && data.detail) || `failed (${res.status})`);
     } catch (e) {
         statusEl.textContent = 'Could not load the Studio.';
         return;
     }
+    // Defensive defaults so a partial payload never crashes the render.
+    data.board = Array.isArray(data.board) ? data.board : [];
+    data.built = Array.isArray(data.built) ? data.built : [];
     statusEl.textContent = data.can_build
         ? '🎨 A build is available this week — build the top pitch below.'
         : `🎨 This week's build is spent — next build in ${data.cooldown_days} day(s). Keep pitching and voting.`;
@@ -1771,7 +1793,8 @@ async function renderStudio() {
         : '<p class="empty-hint">No pitches yet. Ask the room to drop a PITCH: line in chat.</p>';
     for (const p of data.board) {
         const isLeader = p.id === data.leader_id;
-        const voters = p.voters.length ? ` · ${escapeText(p.voters.join(', '))}` : '';
+        const vlist = Array.isArray(p.voters) ? p.voters : [];
+        const voters = vlist.length ? ` · ${escapeText(vlist.join(', '))}` : '';
         const item = document.createElement('div');
         item.className = 'memory-item';
         item.innerHTML =
@@ -2914,6 +2937,9 @@ async function init() {
     // you to the Living Room and the next messages record with everything on.
     if (localStorage.getItem('teamtalk-lounge-mode') === 'on') {
         loungeMode = true;
+        // Restore the parked business session too, so flipping OUT of the
+        // Lounge returns you there instead of a blank new session.
+        savedBizSession = localStorage.getItem('teamtalk-biz-session') || null;
         currentSessionId = loungeSessionId;
         paintLounge();
         if (currentSessionId) { await loadSession(currentSessionId); }

@@ -44,8 +44,10 @@ def _load() -> List[dict]:
 def _save(entries: List[dict]) -> None:
     os.makedirs(MEMORY_DIR, mode=0o700, exist_ok=True)
     # Tombstone BEFORE the drop, at the truncation site — so this holds for
-    # every caller (add/delete/clear), and a failed tombstone write raises
-    # here BEFORE anything is dropped. The drop can never outrun the record.
+    # every caller (add/delete/clear): the record is written first, then the
+    # truncation happens. (ledger.append is best-effort — on a ledger I/O
+    # failure it logs rather than raising, so in that rare case the drop can
+    # still proceed unrecorded; the common path always records first.)
     _record_evictions(entries)
     tmp = f"{MEMORY_PATH}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:

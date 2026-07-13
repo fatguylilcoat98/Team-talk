@@ -118,13 +118,24 @@ def _resolve_pitch(items: List[dict], ref: str) -> Optional[dict]:
         if p.get("id") == ref:
             return p
     low = ref.lower()
-    best = None
-    for p in openp:                       # then by author name appearing in the ref
+    # The intended target is the seat the vote LEADS with, e.g.
+    # "VOTE: Grok - Contradiction Choir". Match the author name at the start
+    # of the ref (longest prefix wins) so an incidental name later in the
+    # line ("...love what Nova said too") can't steal the vote.
+    lead = None
+    for p in openp:
         name = (p.get("author_name") or "").lower()
-        if name and (low == name or low.startswith(name) or name in low):
-            if best is None or len(name) > len(best.get("author_name") or ""):
-                best = p
-    return best
+        if name and (low == name or low.startswith(name)):
+            if lead is None or len(name) > len((lead.get("author_name") or "")):
+                lead = p
+    if lead is not None:
+        return lead
+    # No leading-name match: only resolve if EXACTLY ONE open pitch's author
+    # is mentioned anywhere. Two or more → ambiguous, don't guess.
+    mentioned = [p for p in openp
+                 if (p.get("author_name") or "").lower() and
+                 (p.get("author_name") or "").lower() in low]
+    return mentioned[0] if len(mentioned) == 1 else None
 
 
 def vote(voter_id: str, voter_name: str, ref: str) -> dict:

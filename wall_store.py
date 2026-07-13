@@ -56,11 +56,12 @@ def _load() -> dict:
 
 def _ledger_evicted(items: list, cap: int, action: str) -> None:
     for e in items[:max(0, len(items) - cap)]:
-        if e.get("tombstone"):
-            continue
+        already = e.get("tombstone")
+        # A tombstone aging off the cap gets recorded too — no silent floor.
         ledger.append(e.get("author") or e.get("by") or "system", action,
                       ref=e.get("id") or "",
-                      detail={"reason": f"aged out at the {cap} cap",
+                      detail={"reason": f"aged out at the {cap} cap"
+                              + (" (was already a tombstone)" if already else ""),
                               "text": (e.get("text") or "")[:200]})
 
 

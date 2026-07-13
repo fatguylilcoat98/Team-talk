@@ -178,11 +178,18 @@ async def index():
 
 
 _session_locks: dict = {}
+_SESSION_LOCKS_MAX = 2000   # keep the per-session lock table from growing forever
 
 
 def _session_lock(session_id: str) -> asyncio.Lock:
     lock = _session_locks.get(session_id)
     if lock is None:
+        # Before adding another, drop any idle (unheld) locks if the table has
+        # grown large — a held lock is never evicted, so this can't race a
+        # round in flight. Bounded cleanup for a long-lived server.
+        if len(_session_locks) >= _SESSION_LOCKS_MAX:
+            for k in [k for k, v in _session_locks.items() if not v.locked()]:
+                del _session_locks[k]
         lock = asyncio.Lock()
         _session_locks[session_id] = lock
     return lock
@@ -200,6 +207,25 @@ async def chat(request: ChatRequest):
         async with _session_lock(sid):
             return await _chat_impl(request)
     return await _chat_impl(request)
+
+
+def _clean_markers(text: str, participants: list) -> str:
+    """Strip every marker line WITHOUT storing anything. Module-level twin of
+    the nested _strip_markers, so the Lounge can present a clean read too —
+    a stray MEMORY:/PITCH:/JOURNAL: line shouldn't show raw just because the
+    Lounge saves nothing."""
+    text, _ = memory_store.extract_memories(text)
+    text, _, _ = notebook_store.extract(text)
+    text, _ = journal_store.extract(text)
+    text, _ = questions_store.extract(text)
+    text, _ = mailbox_store.extract(text, participants)
+    text, _ = about_store.extract(text)
+    text, _ = code_access.extract(text)
+    text, _ = proposal_store.extract(text)
+    text, _, _ = studio_store.extract(text)
+    text, _ = mode_shift.extract(text)
+    text = room_actions._ACTION_LINE.sub("", text).strip()
+    return text
 
 
 async def _lounge_turn(session: dict, message: str, turn_style: str,
@@ -238,7 +264,8 @@ async def _lounge_turn(session: dict, message: str, turn_style: str,
             result = await api_client.call_participant(
                 p, system, ctx, context="chat", session_id=session["id"])
             if result["ok"]:
-                so_far.append({"name": p["name"], "text": result["text"]})
+                so_far.append({"name": p["name"],
+                               "text": _clean_markers(result["text"], participants)})
             responses.append(_response_entry(p, result))
     else:
         prompts = [prompt_for(p) for p in participants]
@@ -246,6 +273,11 @@ async def _lounge_turn(session: dict, message: str, turn_style: str,
             *[api_client.call_participant(p, s, c, context="chat", session_id=session["id"])
               for p, (s, c) in zip(participants, prompts)])
         responses = [_response_entry(p, r) for p, r in zip(participants, results)]
+
+    # Nothing is stored in the Lounge, but stray marker lines still get stripped
+    # from the visible read so it stays consistent with every other room.
+    for r in responses:
+        r["text"] = _clean_markers(r["text"], participants)
 
     ok_count = sum(1 for r in responses if r.get("ok", True))
     status = "success" if ok_count == len(responses) else ("partial" if ok_count else "error")
@@ -702,6 +734,10 @@ async def _chat_impl(request: ChatRequest):
             {"id": m["id"], "name": m["name"], "kind": m["kind"]} for m in att_metas
         ],
         **({"mode_shifts": shift_notices} if shift_notices else {}),
+        # 🪞 A Ghost Fork evaporates: it may sit in the verbatim window for a
+        # few rounds, but it must NEVER be compressed into cross-session
+        # episodic memory (episode_store.pending_chunk drops these).
+        **({"ghost_fork": True} if ghost_fork else {}),
         "responses": responses,
     }
 
@@ -1646,10 +1682,15 @@ async def reanchor_workshop(body: WorkshopReanchor):
             raise HTTPException(
                 status_code=400,
                 detail=f"The first break is at v{before.get('first_bad')}, not v{body.version} — re-anchor the actual break")
-        if before.get("reason") == "row hash mismatch":
+        # A re-anchor forgives ONLY a genuine dangling scar (a broken chain
+        # link with no real parent recorded). Every other break — a tampered
+        # row, altered artifact content, a missing file, or an upstream row
+        # rewrite that pushed the break downstream — is content tampering a
+        # re-anchor must never launder.
+        if before.get("reason") != "broken chain link":
             raise HTTPException(
                 status_code=400,
-                detail=f"v{body.version} is a TAMPERED row, not a broken link — a re-anchor can't forgive altered content")
+                detail=f"v{body.version}: {before.get('reason')} — that's altered content, not a forgivable broken link; a re-anchor can't paper over it")
         row = workshop_store.reanchor(body.version, body.reason or "accepted known break", "Chris")
         if not row:
             raise HTTPException(status_code=404, detail=f"Version {body.version} not found")

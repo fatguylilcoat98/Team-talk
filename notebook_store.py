@@ -60,10 +60,12 @@ def _ledger_evicted(items: list, cap: int, action: str) -> None:
     """Record every live item the cap is about to drop — nothing vanishes
     silently (the room's rule)."""
     for e in items[:max(0, len(items) - cap)]:
-        if e.get("tombstone"):
-            continue
+        already = e.get("tombstone")
+        # Even a tombstone aging off the cap gets a record — otherwise the
+        # "nothing vanishes silently" contract has a hole right at the floor.
         ledger.append(e.get("by") or "system", action, ref=e.get("id") or "",
-                      detail={"reason": f"aged out at the {cap} cap",
+                      detail={"reason": f"aged out at the {cap} cap"
+                              + (" (was already a tombstone)" if already else ""),
                               "text": (e.get("text") or e.get("summary") or "")[:200]})
 
 

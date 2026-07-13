@@ -101,7 +101,10 @@ def pending_chunk(session_id: str, rounds: List[dict], keep_recent: int) -> Opti
     """
     aged_out = rounds[:-keep_recent] if len(rounds) > keep_recent else []
     done = covered_until(session_id)
-    todo = [r for r in aged_out if (r.get("round") or 0) > done]
+    # 🪞 Ghost Fork rounds evaporate — they never become permanent episodic
+    # memory, so they're excluded from every compression chunk.
+    todo = [r for r in aged_out
+            if (r.get("round") or 0) > done and not r.get("ghost_fork")]
     if len(todo) < MIN_CHUNK:
         return None
     return todo[:CHUNK_ROUNDS]

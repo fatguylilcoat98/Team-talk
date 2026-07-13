@@ -49,6 +49,12 @@ ACTIONS = {
     "code_shipped",
     "proposal_sealed", "proposal_ruled", "proposal_revealed",
     "mode_shift",
+    # silent-eviction tombstones — the record that "nothing vanishes silently"
+    "memory_evicted", "memory_tombstone_evicted", "notebook_entry_evicted",
+    "pin_evicted", "wall_note_evicted", "episode_evicted",
+    "receipt_evicted_undelivered",
+    # workshop chain repair
+    "workshop_verdict_overridden", "workshop_reanchored",
 }
 
 
