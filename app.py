@@ -886,11 +886,15 @@ async def get_memory():
 
 @app.post("/api/memory")
 async def add_memory(body: MemoryAdd):
-    """Chris states a fact directly — saved with [stated] provenance."""
+    """Chris states a fact directly — saved with [stated] provenance. Also the
+    "💾 Save to memory" button (e.g. pulling one line out of the Lounge)."""
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Memory is empty")
-    return memory_store.add(text, "Chris", kind="chris_stated")
+    entry = memory_store.add(text, "Chris", kind="chris_stated")
+    ledger.append("Chris", "memory_created", ref=entry["id"],
+                  detail={"text": text[:200], "source": "saved by Chris"})
+    return entry
 
 
 @app.delete("/api/memory/{memory_id}")

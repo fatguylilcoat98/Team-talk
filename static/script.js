@@ -672,6 +672,25 @@ function speakerEl(color, name) {
     return el;
 }
 
+async function saveToMemory(text, btn) {
+    const suggested = (text || '').trim().slice(0, 300);
+    const toSave = prompt('Save to memory — trim it to the fact worth keeping:', suggested);
+    if (toSave === null) return;               // cancelled
+    const clean = toSave.trim();
+    if (!clean) return;
+    try {
+        const res = await fetch('/api/memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: clean }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `failed (${res.status})`);
+        if (btn) { btn.textContent = '✓ Saved to memory'; btn.disabled = true; }
+    } catch (e) {
+        alert('Could not save to memory: ' + e.message);
+    }
+}
+
 function aiBubble(resp, allNames = [], reveal = false) {
     const el = document.createElement('div');
     const isError = (resp.text || '').startsWith('Error:');
@@ -707,6 +726,18 @@ function aiBubble(resp, allNames = [], reveal = false) {
     body.className = 'bubble-text';
     body.textContent = resp.text || '';
     el.appendChild(body);
+
+    // 💾 Pull this line into long-term memory — the manual save (the only way
+    // anything from the off-the-record Lounge gets kept).
+    if (!isError) {
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'save-mem-btn';
+        saveBtn.title = "Save this to the room's long-term memory";
+        saveBtn.textContent = '💾 Save to memory';
+        saveBtn.addEventListener('click', () => saveToMemory(resp.text || '', saveBtn));
+        el.appendChild(saveBtn);
+    }
 
     if (resp.tokens !== undefined && !isError) {
         const t = document.createElement('span');

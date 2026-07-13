@@ -1929,6 +1929,21 @@ button.danger:hover {
     border: 1px solid #6b5642;
 }
 body.lounge-active {
-    background: #f4ece0;   /* a warm, cozy shift — still light, still readable */
+    background: #1c1712;   /* a warm, dark, cozy shift on the dark theme */
 }
 .lounge-toggle-label { white-space: nowrap; }
+
+/* 💾 Per-message "save to memory" — subtle until hovered/tapped. */
+.save-mem-btn {
+    margin-top: 8px;
+    padding: 3px 9px;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    opacity: 0.6;
+}
+.save-mem-btn:hover { opacity: 1; background: var(--surface-2); color: var(--text); }
+.save-mem-btn:disabled { opacity: 1; color: #6fce97; border-color: #2f6a45; background: transparent; cursor: default; }
