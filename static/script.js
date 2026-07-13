@@ -1723,7 +1723,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals', 'studio'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
