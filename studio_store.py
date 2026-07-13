@@ -154,8 +154,22 @@ def build(pitch_id: str) -> dict:
         return {"ok": False, "reason": "no open pitch with that id"}
     target["status"] = "built"
     target["built_at"] = _now()
+    target["opened"] = False        # the pitching seat gets first try before the room
     _save(items)
     return {"ok": True, "pitch": target}
+
+
+def open_to_room(pitch_id: str) -> dict:
+    """After the seat who pitched it has had first try, Chris opens the build
+    to the whole room. Returns {"ok", "reason"|"pitch"}."""
+    items = _load()
+    p = next((x for x in items if x.get("id") == pitch_id and x.get("status") == "built"), None)
+    if p is None:
+        return {"ok": False, "reason": "no built pitch with that id"}
+    p["opened"] = True
+    p["opened_at"] = _now()
+    _save(items)
+    return {"ok": True, "pitch": p}
 
 
 # --- views -------------------------------------------------------------------
@@ -182,7 +196,8 @@ def snapshot() -> dict:
         return {"id": p["id"], "author": p.get("author_name", "?"),
                 "text": p.get("text", ""), "votes": _votes(p),
                 "voters": list(p.get("votes", {}).values()),
-                "ts": p.get("ts", ""), "built_at": p.get("built_at", "")}
+                "ts": p.get("ts", ""), "built_at": p.get("built_at", ""),
+                "opened": bool(p.get("opened"))}
 
     return {
         "board": [pub(p) for p in board],
@@ -214,7 +229,8 @@ def context_block() -> str:
     lines.append("Pitch ONE favorite (replaces your current one):  PITCH: <idea>")
     lines.append("Vote for ONE you love — not your own — by id:  VOTE: <id from above>")
     if remaining <= 0:
-        lines.append("A build is available this week; Chris builds the top-voted pitch.")
+        lines.append("A build is available this week; Chris builds the top-voted pitch — "
+                     "and the seat who pitched it gets to try it first.")
     else:
         lines.append(f"This week's build is spent — next one in {remaining:.1f} days. "
                      "Keep pitching and voting; losers stay on the board for a future week.")

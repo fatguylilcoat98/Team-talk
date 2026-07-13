@@ -1819,7 +1819,20 @@ async def build_studio(body: StudioBuild):
                   detail={"author": p.get("author_name", "?"),
                           "text": p.get("text", "")[:200]})
     receipt_store.issue(p.get("author_id", "?"), "studio_built", "success",
-                        {"pitch_id": p["id"], "note": "Chris is building your pitch"})
+                        {"pitch_id": p["id"],
+                         "note": "Chris is building your pitch — you get to try it first"})
+    return studio_store.snapshot()
+
+
+@app.post("/api/studio/open")
+async def open_studio(body: StudioBuild):
+    """Chris opens a built pitch to the whole room, after its author's first try."""
+    res = studio_store.open_to_room(body.pitch_id)
+    if not res["ok"]:
+        raise HTTPException(status_code=400, detail=res["reason"])
+    p = res["pitch"]
+    ledger.append("Chris", "studio_opened", ref=p["id"],
+                  detail={"author": p.get("author_name", "?")})
     return studio_store.snapshot()
 
 

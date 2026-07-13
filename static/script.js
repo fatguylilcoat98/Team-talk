@@ -1789,10 +1789,34 @@ async function renderStudio() {
     for (const p of data.built) {
         const item = document.createElement('div');
         item.className = 'memory-item';
+        const firstTry = p.opened
+            ? `open to the room · pitched by ${escapeText(p.author)}`
+            : `🎁 first try: <strong>${escapeText(p.author)}</strong> — theirs before the room's`;
         item.innerHTML =
             `<div class="memory-text">✅ <strong>${escapeText(p.author)}</strong> — ${escapeText(p.text)}</div>` +
-            `<div class="memory-meta">built ${(p.built_at || '').slice(0, 16).replace('T', ' ')}</div>`;
+            `<div class="memory-meta">built ${(p.built_at || '').slice(0, 16).replace('T', ' ')} · ${firstTry}</div>`;
+        if (!p.opened) {
+            const o = document.createElement('button');
+            o.textContent = '🔓 Open to the room';
+            o.title = 'Once its author has had first try, open the build to everyone';
+            o.addEventListener('click', () => openStudio(p.id));
+            item.appendChild(o);
+        }
         builtEl.appendChild(item);
+    }
+}
+
+async function openStudio(pitchId) {
+    try {
+        const res = await fetch('/api/studio/open', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pitch_id: pitchId }),
+        });
+        if (!res.ok) { alert((await res.json().catch(() => ({}))).detail || 'Could not open.'); return; }
+        renderStudio();
+    } catch (e) {
+        alert('Could not reach the room.');
     }
 }
 
