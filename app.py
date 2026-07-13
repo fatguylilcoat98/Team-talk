@@ -46,6 +46,7 @@ import night_shift
 import notebook_store
 import proposal_store
 import questions_store
+import studio_store
 import receipt_store
 import room_actions
 import session_manager
@@ -359,6 +360,7 @@ async def _chat_impl(request: ChatRequest):
                   questions_store.context_block(),
                   workshop_store.context_block(settings_store.get_participants()),
                   proposal_store.context_block(),
+                  studio_store.context_block(),
                   code_access.index_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
@@ -429,6 +431,7 @@ async def _chat_impl(request: ChatRequest):
         text, _ = about_store.extract(text)
         text, _ = code_access.extract(text)
         text, _ = proposal_store.extract(text)
+        text, _, _ = studio_store.extract(text)
         text, _ = mode_shift.extract(text)
         text = room_actions._ACTION_LINE.sub("", text).strip()
         return text
@@ -611,6 +614,31 @@ async def _chat_impl(request: ChatRequest):
                 else:
                     receipt_store.issue(r["id"], "proposal_submit", "rejected",
                                         {"reason": "a proposal is already live — one at a time"})
+        # 🎨 THE STUDIO — pitch a creative build / vote for one (open, not sealed).
+        cleaned, pitches, votes = studio_store.extract(r["text"])
+        if pitches or votes or cleaned != r["text"]:
+            r["text"] = cleaned
+            for idea in pitches[:1]:            # one favorite per message
+                res = studio_store.add_pitch(r["id"], author, idea)
+                p = res["pitch"]
+                ledger.append(author, "studio_pitch", ref=p["id"],
+                              detail={"text": idea[:200], "replaced": res["replaced"]})
+                receipt_store.issue(r["id"], "studio_pitch", "success",
+                                    {"pitch_id": p["id"],
+                                     "note": "replaced your prior pitch" if res["replaced"] else "on the board"})
+            for _ in pitches[1:]:
+                receipt_store.issue(r["id"], "studio_pitch", "rejected",
+                                    {"reason": "one favorite pitch per message — keep only your best"})
+            for pid in votes[:1]:              # one vote per message
+                vres = studio_store.vote(r["id"], author, pid)
+                if vres["ok"]:
+                    ledger.append(author, "studio_vote", ref=pid, detail={})
+                    receipt_store.issue(r["id"], "studio_vote", "success", {"pitch_id": pid})
+                else:
+                    receipt_store.issue(r["id"], "studio_vote", "rejected", {"reason": vres["reason"]})
+            for _ in votes[1:]:
+                receipt_store.issue(r["id"], "studio_vote", "rejected",
+                                    {"reason": "one vote per message"})
         # 🔀 SHIFT TO — the seats' own mode power (Night Shift #2 spec).
         # Evaluated in response order = turn order, so earliest seat wins.
         cleaned, shift_requests = mode_shift.extract(r["text"])
@@ -1767,6 +1795,32 @@ async def rule_proposal(proposal_id: str, body: ProposalRuling):
                             {"proposal_id": p["id"], "status": p["status"],
                              "seal_held": seal_held})
     return proposal_store.public_view(p)
+
+
+# --- 🎨 The Studio (creative room) -------------------------------------------
+
+class StudioBuild(BaseModel):
+    pitch_id: str
+
+
+@app.get("/api/studio")
+async def get_studio():
+    return studio_store.snapshot()
+
+
+@app.post("/api/studio/build")
+async def build_studio(body: StudioBuild):
+    """Chris builds the winner. Enforces one build a week."""
+    res = studio_store.build(body.pitch_id)
+    if not res["ok"]:
+        raise HTTPException(status_code=400, detail=res["reason"])
+    p = res["pitch"]
+    ledger.append("Chris", "studio_built", ref=p["id"],
+                  detail={"author": p.get("author_name", "?"),
+                          "text": p.get("text", "")[:200]})
+    receipt_store.issue(p.get("author_id", "?"), "studio_built", "success",
+                        {"pitch_id": p["id"], "note": "Chris is building your pitch"})
+    return studio_store.snapshot()
 
 
 # --- 🎬 Director's Cut --------------------------------------------------------

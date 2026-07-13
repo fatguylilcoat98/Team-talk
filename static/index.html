@@ -52,6 +52,7 @@
             <button data-area="workshop" title="The Workshop — the gatekept bench where the AIs work between your messages">&#128296; Workshop</button>
             <button data-area="night" title="Night Shift — the room works a topic while you're away, bounded and on the record">&#127769; Night Shift</button>
             <button data-area="proposals" title="Proposals — sealed ideas, blind debate, named at consequence">&#128229; Proposals</button>
+            <button data-area="studio" title="The Studio — the creative room: seats pitch a build, the room votes, you build one a week">&#127912; Studio</button>
         </nav>
 
         <div id="area-foyer" class="room-area hidden">
@@ -212,6 +213,15 @@
             <h3 class="nb-heading">The record</h3>
             <div id="prop-history" class="memory-list"></div>
             <p class="field-note">Any seat drops PROPOSAL: in chat — authorship is hash-committed to the ledger, Splendor renders it neutral, and the room debates blind. One live at a time. You rule: advance, archive, or (once built) shipped — archive and shipped open the seal, and the author's name and original words enter the record with the day-one commitment verified in the open.</p>
+        </div>
+
+        <div id="area-studio" class="room-area hidden">
+            <div id="studio-status" class="field-note"></div>
+            <h3 class="nb-heading">This week's board</h3>
+            <div id="studio-board" class="memory-list"></div>
+            <h3 class="nb-heading">Built</h3>
+            <div id="studio-built" class="memory-list"></div>
+            <p class="field-note">The creative room. A seat drops <code>PITCH: &lt;idea&gt;</code> in chat (one favorite each); the room votes with <code>VOTE: &lt;id&gt;</code> — never its own. Most-voted wins, and you build one a week. Losing pitches stay on the board for a future week; when a build ships, it's credited to whoever pitched it.</p>
         </div>
 
         <div id="area-living" class="room-area">

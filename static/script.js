@@ -1740,12 +1740,76 @@ function showArea(area) {
     if (area === 'workshop') renderWorkshop();
     if (area === 'night') renderNight();
     if (area === 'proposals') renderProposals();
+    if (area === 'studio') renderStudio();
 }
 
 roomNav.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-area]');
     if (btn) showArea(btn.dataset.area);
 });
+
+// --- 🎨 The Studio (creative room)
+async function renderStudio() {
+    const statusEl = document.getElementById('studio-status');
+    const boardEl = document.getElementById('studio-board');
+    const builtEl = document.getElementById('studio-built');
+    let data;
+    try {
+        const res = await fetch('/api/studio');
+        data = await res.json();
+    } catch (e) {
+        statusEl.textContent = 'Could not load the Studio.';
+        return;
+    }
+    statusEl.textContent = data.can_build
+        ? '🎨 A build is available this week — build the top pitch below.'
+        : `🎨 This week's build is spent — next build in ${data.cooldown_days} day(s). Keep pitching and voting.`;
+
+    boardEl.innerHTML = data.board.length ? ''
+        : '<p class="empty-hint">No pitches yet. Ask the room to drop a PITCH: line in chat.</p>';
+    for (const p of data.board) {
+        const isLeader = p.id === data.leader_id;
+        const voters = p.voters.length ? ` · ${escapeText(p.voters.join(', '))}` : '';
+        const item = document.createElement('div');
+        item.className = 'memory-item';
+        item.innerHTML =
+            `<div class="memory-text">${isLeader ? '👑 ' : ''}<strong>${escapeText(p.author)}</strong> — ${escapeText(p.text)}</div>` +
+            `<div class="memory-meta">${p.votes} vote${p.votes === 1 ? '' : 's'}${voters} · ${escapeText(p.id)}</div>`;
+        if (data.can_build) {
+            const b = document.createElement('button');
+            b.className = 'primary';
+            b.textContent = isLeader ? '🔨 Build this (winner)' : '🔨 Build this';
+            b.addEventListener('click', () => buildStudio(p.id));
+            item.appendChild(b);
+        }
+        boardEl.appendChild(item);
+    }
+
+    builtEl.innerHTML = data.built.length ? '' : '<p class="field-note">Nothing built yet.</p>';
+    for (const p of data.built) {
+        const item = document.createElement('div');
+        item.className = 'memory-item';
+        item.innerHTML =
+            `<div class="memory-text">✅ <strong>${escapeText(p.author)}</strong> — ${escapeText(p.text)}</div>` +
+            `<div class="memory-meta">built ${(p.built_at || '').slice(0, 16).replace('T', ' ')}</div>`;
+        builtEl.appendChild(item);
+    }
+}
+
+async function buildStudio(pitchId) {
+    if (!confirm('Make this the build for this week? (One build a week.)')) return;
+    try {
+        const res = await fetch('/api/studio/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pitch_id: pitchId }),
+        });
+        if (!res.ok) { alert((await res.json().catch(() => ({}))).detail || 'Could not build.'); return; }
+        renderStudio();
+    } catch (e) {
+        alert('Could not reach the room.');
+    }
+}
 
 // --- The Foyer Board
 async function renderFoyer() {
