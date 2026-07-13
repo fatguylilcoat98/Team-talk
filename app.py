@@ -1417,6 +1417,11 @@ class WorkshopToggle(BaseModel):
     auto_cycle: bool
 
 
+class WorkshopReanchor(BaseModel):
+    version: int
+    reason: Optional[str] = ""
+
+
 @app.get("/api/workshop")
 async def get_workshop():
     state = workshop_store.load_state()
@@ -1513,6 +1518,33 @@ async def toggle_workshop_auto(body: WorkshopToggle):
         state["auto_cycle"] = bool(body.auto_cycle)
         workshop_store.save_state(state)
     return {"auto_cycle": bool(body.auto_cycle)}
+
+
+@app.post("/api/workshop/reanchor")
+async def reanchor_workshop(body: WorkshopReanchor):
+    """Accept a known chain break — append-only, never a rewrite. Only the
+    ACTUAL first break can be re-anchored, so this can't paper over a valid
+    chain or dodge a tampered row."""
+    async with _workshop_cycle_running:
+        before = workshop_store.verify_chain()
+        if before.get("valid"):
+            raise HTTPException(status_code=400, detail="Chain is already valid — nothing to re-anchor")
+        if before.get("first_bad") != body.version:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The first break is at v{before.get('first_bad')}, not v{body.version} — re-anchor the actual break")
+        if before.get("reason") == "row hash mismatch":
+            raise HTTPException(
+                status_code=400,
+                detail=f"v{body.version} is a TAMPERED row, not a broken link — a re-anchor can't forgive altered content")
+        row = workshop_store.reanchor(body.version, body.reason or "accepted known break", "Chris")
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Version {body.version} not found")
+        ledger.append("Chris", "workshop_reanchored", ref=f"v{body.version}",
+                      detail={"reason": (body.reason or "")[:200],
+                              "accepted_hash": (row.get("accepted_hash") or "")[:16]})
+        after = workshop_store.verify_chain()
+    return {"reanchored": body.version, "chain_before": before, "chain_after": after}
 
 
 @app.get("/api/workshop/versions/{v}")
