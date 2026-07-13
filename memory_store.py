@@ -43,6 +43,10 @@ def _load() -> List[dict]:
 
 def _save(entries: List[dict]) -> None:
     os.makedirs(MEMORY_DIR, mode=0o700, exist_ok=True)
+    # Tombstone BEFORE the drop, at the truncation site — so this holds for
+    # every caller (add/delete/clear), and a failed tombstone write raises
+    # here BEFORE anything is dropped. The drop can never outrun the record.
+    _record_evictions(entries)
     tmp = f"{MEMORY_PATH}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(entries[-MAX_ENTRIES:], f, indent=2, ensure_ascii=False)
@@ -83,8 +87,7 @@ def add(text: str, by: str, kind: str = "ai_observed") -> dict:
              "created_at": _now()}
     entries = _load()
     entries.append(entry)
-    _record_evictions(entries)   # ledger anything the cap is about to drop
-    _save(entries)
+    _save(entries)   # _save records evictions before it drops anything
     return entry
 
 
