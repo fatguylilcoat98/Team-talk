@@ -61,6 +61,13 @@ ACTIONS = {
     "mission_opened", "mission_registered", "mission_phase",
     "mission_candidate", "mission_break", "mission_attempt_started",
     "mission_closed",
+    # 🃏 the choice (private, temporary archive review)
+    "choice_opened", "choice_ended", "choice_expired", "choice_cleanup",
+    "choice_memory_saved",
+    # 📺 the CRT (the graveyard television)
+    "crt_pinned", "crt_evicted",
+    # ✋ seat moves (the scratchpad is deliberately un-ledgered)
+    "seat_passed",
 }
 
 

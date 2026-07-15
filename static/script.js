@@ -171,6 +171,198 @@ document.getElementById('archive-download').addEventListener('click', async () =
     archivePanel.classList.add('hidden');
 });
 
+// --- 🃏 The Choice: private, temporary archive review ----------------------
+
+const choicePanel = document.getElementById('choice-panel');
+let choiceShowAudit = false;
+
+document.getElementById('choice-btn').addEventListener('click', () => {
+    if (!choicePanel.classList.contains('hidden')) {
+        choicePanel.classList.add('hidden');
+        return;
+    }
+    choicePanel.classList.remove('hidden');
+    renderChoice();
+});
+
+async function renderChoice() {
+    const body = document.getElementById('choice-body');
+    if (!body) return;
+    let st;
+    try {
+        const res = await fetch('/api/choice');
+        if (res.status === 404) { body.innerHTML = choiceRestartHint(); return; }
+        st = await res.json();
+    } catch (e) { body.innerHTML = '<p class="field-note">Could not reach The Choice.</p>'; return; }
+    body.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'archive-head';
+    head.innerHTML = '<strong>🃏 The Choice</strong>' +
+        '<span class="field-note" style="flex:1"> — each seat gets the same archive, privately, and decides for itself.</span>' +
+        '<button id="choice-close">✕</button>';
+    body.appendChild(head);
+    head.querySelector('#choice-close').addEventListener('click', () => choicePanel.classList.add('hidden'));
+
+    if (st.active) { renderChoiceActive(body, st); }
+    else { renderChoiceSetup(body); }
+}
+
+function choiceRestartHint() {
+    return '<p class="field-note">The Choice needs a server restart — run: sudo systemctl restart team-talk</p>';
+}
+
+async function renderChoiceSetup(body) {
+    // Step 1 — source
+    const box = document.createElement('div');
+    box.className = 'choice-setup';
+    box.innerHTML =
+        '<div class="field-note">Give every selected seat temporary, <strong>private</strong> access to an archive. ' +
+        'No one is required to read it or save anything, and no seat can see what another seat does with it.</div>' +
+        '<label class="choice-lbl">Source</label>' +
+        '<select id="choice-src">' +
+        '<option value="session">this session</option>' +
+        '<option value="pick">another session…</option>' +
+        '<option value="archive_all">the full archive (all sessions)</option>' +
+        '</select>' +
+        '<div id="choice-pick-wrap" class="hidden"><select id="choice-pick"></select></div>' +
+        '<label class="choice-lbl">Seats (each decides independently)</label>' +
+        '<div id="choice-seats" class="choice-seats"></div>' +
+        '<label class="choice-lbl">Expires after</label>' +
+        '<select id="choice-rounds">' +
+        '<option value="1">1 Living Room round</option>' +
+        '<option value="3" selected>3 Living Room rounds</option>' +
+        '<option value="5">5 Living Room rounds</option>' +
+        '<option value="10">10 Living Room rounds</option>' +
+        '<option value="50">end of session (50)</option>' +
+        '</select>' +
+        '<div class="field-note">Countdown is in <strong>Living Room rounds</strong> — Lounge rounds do not count. ' +
+        'When it expires, the temporary archive is deleted; anything a seat deliberately saved becomes ordinary shared memory.</div>' +
+        '<button id="choice-start" class="primary">🃏 Start The Choice</button>';
+    body.appendChild(box);
+
+    // populate seats + sessions
+    let seats = [], sessions = [];
+    try { seats = (await (await fetch('/api/settings')).json()).participants || []; } catch (e) {}
+    try { sessions = (await (await fetch('/api/sessions')).json()).sessions || []; } catch (e) {}
+    const seatsEl = document.getElementById('choice-seats');
+    for (const p of seats.filter((s) => !s.resting)) {
+        const l = document.createElement('label');
+        l.className = 'choice-seat';
+        l.innerHTML = `<input type="checkbox" class="choice-seat-pick" value="${escapeText(p.id)}" checked> ${escapeText(p.name)}`;
+        seatsEl.appendChild(l);
+    }
+    const pick = document.getElementById('choice-pick');
+    for (const s of sessions) {
+        const o = document.createElement('option');
+        o.value = s.id; o.textContent = `${s.id} (${s.rounds} rounds)`;
+        pick.appendChild(o);
+    }
+    document.getElementById('choice-src').addEventListener('change', (e) => {
+        document.getElementById('choice-pick-wrap').classList.toggle('hidden', e.target.value !== 'pick');
+    });
+    document.getElementById('choice-start').addEventListener('click', startChoice);
+}
+
+async function startChoice() {
+    const srcSel = document.getElementById('choice-src').value;
+    const chosenSeats = [...document.querySelectorAll('.choice-seat-pick:checked')].map((b) => b.value);
+    if (!chosenSeats.length) { alert('Pick at least one seat.'); return; }
+    let payload = { seats: chosenSeats, rounds: parseInt(document.getElementById('choice-rounds').value, 10) };
+    if (srcSel === 'archive_all') { payload.source_type = 'archive_all'; }
+    else if (srcSel === 'pick') { payload.source_type = 'session'; payload.source_id = document.getElementById('choice-pick').value; }
+    else { payload.source_type = 'session'; payload.source_id = currentSessionId; }
+    if (payload.source_type === 'session' && !payload.source_id) { alert('No session selected — start or pick one first.'); return; }
+    const res = await fetch('/api/choice', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) { alert((await res.json().catch(() => ({}))).detail || 'Could not start The Choice.'); return; }
+    renderChoice();
+}
+
+function renderChoiceActive(body, st) {
+    const card = document.createElement('div');
+    card.className = 'choice-active';
+    card.innerHTML =
+        '<div class="choice-live">🟢 The Choice is <strong>active</strong></div>' +
+        `<div class="choice-stat"><span>Source</span><b>${escapeText(st.source)}</b></div>` +
+        `<div class="choice-stat"><span>Seats</span><b>${escapeText((st.seats || []).join(', '))}</b></div>` +
+        `<div class="choice-stat"><span>Expires</span><b>${st.rounds_remaining} of ${st.expiry_rounds} rounds left</b></div>` +
+        `<div class="field-note">${escapeText(st.countdown_unit || '')}</div>` +
+        '<div class="choice-actions">' +
+        '<button id="choice-end-btn" class="danger">End The Choice now</button>' +
+        '<button id="choice-audit-btn">🔒 Owner debug view</button>' +
+        '</div>' +
+        '<div class="field-note">What each seat did stays private. The panel above shows only safe status — never a seat\'s reading or saves.</div>' +
+        '<div id="choice-audit" class="hidden"></div>';
+    body.appendChild(card);
+    document.getElementById('choice-end-btn').addEventListener('click', async () => {
+        if (!confirm('End The Choice now? The archive is deleted; anything a seat saved becomes shared memory.')) return;
+        await fetch('/api/choice/end', { method: 'POST' });
+        renderChoice();
+    });
+    document.getElementById('choice-audit-btn').addEventListener('click', toggleChoiceAudit);
+    if (choiceShowAudit) { toggleChoiceAudit(true); }
+}
+
+async function toggleChoiceAudit(force) {
+    const el = document.getElementById('choice-audit');
+    if (!el) return;
+    choiceShowAudit = (force === true) ? true : el.classList.contains('hidden');
+    if (!choiceShowAudit) { el.classList.add('hidden'); return; }
+    let a;
+    try { a = await (await fetch('/api/choice/audit')).json(); } catch (e) { return; }
+    el.classList.remove('hidden');
+    el.innerHTML =
+        '<div class="choice-audit-warn">🔒 PRIVATE OPERATIONAL TELEMETRY — owner debugging only. ' +
+        'The seats never see this; it is never put into any AI\'s context.</div>' +
+        (a.seats || []).map((s) =>
+            `<div class="choice-stat"><span>${escapeText(s.seat)}</span>` +
+            `<b>${escapeText(s.status)} · ${s.pages_read} pages · ${s.saves} saved · disclose: ${escapeText(s.disclosure)}</b></div>`
+        ).join('');
+}
+
+// --- 📺 The CRT: the graveyard television ----------------------------------
+
+async function renderCrt() {
+    const screen = document.getElementById('crt-screen');
+    if (!screen) return;
+    let items = [];
+    try {
+        const res = await fetch('/api/crt');
+        if (res.status === 404) { screen.innerHTML = '<p class="field-note">The CRT needs a server restart.</p>'; return; }
+        items = (await res.json()).items || [];
+    } catch (e) { screen.innerHTML = '<p class="field-note">Static.</p>'; return; }
+    if (!items.length) {
+        screen.innerHTML = '<div class="crt-static">— static —<br><span class="field-note">nothing pinned yet</span></div>';
+        return;
+    }
+    screen.innerHTML = '';
+    items.slice().reverse().forEach((it, i) => {
+        const row = document.createElement('div');
+        row.className = 'crt-item';
+        row.style.animationDelay = `${(i % 6) * 0.4}s`;
+        row.innerHTML = `<span class="crt-text">“${escapeText(it.text)}”</span>` +
+            `<span class="crt-by">— ${escapeText(it.by)}</span>` +
+            `<button class="crt-del" title="take it off the screen" data-id="${escapeText(it.id)}">✕</button>`;
+        screen.appendChild(row);
+    });
+    for (const b of screen.querySelectorAll('.crt-del')) {
+        b.addEventListener('click', async () => {
+            await fetch(`/api/crt/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE' });
+            renderCrt();
+        });
+    }
+}
+
+document.getElementById('crt-pin-btn')?.addEventListener('click', async () => {
+    const inp = document.getElementById('crt-input');
+    const text = inp.value.trim();
+    if (!text) return;
+    await fetch('/api/crt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    inp.value = '';
+    renderCrt();
+});
+
 deleteBtn.addEventListener('click', async () => {
     if (!currentSessionId) {
         alert('No active session to delete.');
@@ -741,7 +933,12 @@ function aiBubble(resp, allNames = [], reveal = false) {
 
     const body = document.createElement('div');
     body.className = 'bubble-text';
-    body.textContent = resp.text || '';
+    if (resp.passed && !(resp.text || '').trim()) {
+        body.className = 'bubble-text passed-note';
+        body.textContent = '— passed (present, nothing to add this round) —';
+    } else {
+        body.textContent = resp.text || '';
+    }
     el.appendChild(body);
 
     // 💾 Pull this line into long-term memory — the manual save (the only way
@@ -769,6 +966,9 @@ function aiBubble(resp, allNames = [], reveal = false) {
         if (resp.questions_asked) extra += '  ·  ❓ asked Chris a question';
         if (resp.mail_sent) extra += '  ·  📬 left mail';
         if (resp.about_written) extra += '  ·  🪪 updated About Me';
+        if (resp.crt_pinned) extra += `  ·  📺 pinned to the CRT`;
+        if (resp.scratched) extra += `  ·  ✏️ scratchpad`;
+        if (resp.retracted) extra += `  ·  ♻️ retracted ${resp.retracted === 1 ? 'a memory' : resp.retracted + ' memories'}`;
         if (resp.studio_pitched) extra += '  ·  🎨 pitched to the Studio';
         if (resp.studio_voted) extra += `  ·  🗳️ voted ${resp.studio_voted}`;
         if (resp.room_actions) {
@@ -1737,7 +1937,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals', 'studio', 'mission'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals', 'studio', 'mission', 'crt'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1758,6 +1958,7 @@ function showArea(area) {
     if (area === 'proposals') renderProposals();
     if (area === 'studio') renderStudio();
     if (area === 'mission') renderMission();
+    if (area === 'crt') renderCrt();
 }
 
 roomNav.addEventListener('click', (e) => {

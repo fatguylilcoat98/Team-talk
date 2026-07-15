@@ -80,17 +80,40 @@ def _record_evictions(entries: List[dict]) -> None:
         )
 
 
-def add(text: str, by: str, kind: str = "ai_observed") -> dict:
+def add(text: str, by: str, kind: str = "ai_observed",
+        provenance: dict = None, quarantine: str = "") -> dict:
     """kind: "chris_stated" (Chris said it directly — fact) or "ai_observed"
-    (an AI's own interpretation — carries doubt). Provenance, Splendor-style."""
+    (an AI's own interpretation — carries doubt). Provenance, Splendor-style.
+
+    provenance: optional origin record (e.g. The Choice tags source/instance).
+    quarantine: optional Choice-instance id — while set, the entry is invisible
+    to every seat's context (release_quarantine clears it at window close)."""
     text = text.strip()[:MAX_MEMORY_CHARS]
     entry = {"id": uuid.uuid4().hex[:12], "text": text, "by": by,
              "kind": kind if kind in ("chris_stated", "ai_observed") else "ai_observed",
              "created_at": _now()}
+    if provenance:
+        entry["provenance"] = provenance
+    if quarantine:
+        entry["quarantined"] = str(quarantine)[:40]
     entries = _load()
     entries.append(entry)
     _save(entries)   # _save records evictions before it drops anything
     return entry
+
+
+def release_quarantine(choice_id: str) -> int:
+    """The Choice window closed: its quarantined memories become ordinary
+    shared room memory (provenance kept). Returns how many were released."""
+    entries = _load()
+    released = 0
+    for e in entries:
+        if e.get("quarantined") == choice_id:
+            del e["quarantined"]
+            released += 1
+    if released:
+        _save(entries)
+    return released
 
 
 def _tombstone(entry: dict, reason: str, authority: str) -> dict:
@@ -113,6 +136,22 @@ def delete(memory_id: str, reason: str = "removed by Chris via the Memory panel"
     for i, e in enumerate(entries):
         if e.get("id") == memory_id and not e.get("tombstone"):
             entries[i] = _tombstone(e, reason, authority)
+            changed = True
+    if changed:
+        _save(entries)
+    return changed
+
+
+def supersede(memory_id: str, by: str) -> bool:
+    """A seat retracts its OWN memory — the room's self-retract ask (Muse #4).
+    Append-only would leave bad takes fossilized forever; this tombstones the
+    entry (glass-box: the correction is visible, the content goes) but ONLY if
+    the caller is the memory's author. Returns False otherwise."""
+    entries = _load()
+    changed = False
+    for i, e in enumerate(entries):
+        if e.get("id") == memory_id and not e.get("tombstone") and e.get("by") == by:
+            entries[i] = _tombstone(e, f"superseded by {by}", by)
             changed = True
     if changed:
         _save(entries)
@@ -147,7 +186,10 @@ def extract_memories(text: str) -> Tuple[str, List[str]]:
 
 def context_block() -> str:
     """The memory section injected at the top of every AI's context."""
-    entries = [e for e in _load() if not e.get("tombstone")][-CONTEXT_ENTRIES:]
+    # Quarantined entries (The Choice, window still open) are invisible to
+    # every seat — they join the shared pool only when the window closes.
+    entries = [e for e in _load()
+               if not e.get("tombstone") and not e.get("quarantined")][-CONTEXT_ENTRIES:]
     if not entries:
         return ""
     lines = ["=== LONG-TERM MEMORY (saved in past conversations) ==="]

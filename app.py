@@ -29,7 +29,9 @@ from pydantic import BaseModel
 import about_store
 import api_client
 import brain
+import choice_store
 import code_access
+import crt_store
 import director
 import episode_store
 import failure_log
@@ -50,6 +52,8 @@ import questions_store
 import studio_store
 import receipt_store
 import room_actions
+import scratch_store
+import seat_moves
 import session_manager
 import settings_store
 import splendor
@@ -67,6 +71,16 @@ app = FastAPI(title="Team Talk")
 # A 🌙 run that says "running" after a restart is a ghost — no task behind
 # it. Close it honestly before anyone reads the state.
 night_shift.mark_stale()
+
+# 🃏 Sweep any abandoned/expired Choice artifacts left by a crash or a failed
+# delete. Expiry lives on disk, not in a timer, so an ACTIVE window survives
+# a restart; only non-active remnants are purged.
+try:
+    _swept = choice_store.startup_cleanup()
+    if _swept:
+        print(f"[CHOICE] startup cleanup removed {_swept} orphaned instance(s)")
+except Exception as _e:  # never let cleanup block boot
+    print(f"[CHOICE] startup cleanup error: {_e}")
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -224,6 +238,10 @@ def _clean_markers(text: str, participants: list) -> str:
     text, _ = code_access.extract(text)
     text, _ = proposal_store.extract(text)
     text, _, _ = studio_store.extract(text)
+    text, _ = choice_store.extract(text)
+    text, _ = crt_store.extract(text)
+    text, _ = scratch_store.extract(text)
+    text, _, _ = seat_moves.extract(text)
     text, _ = mode_shift.extract(text)
     text = room_actions._ACTION_LINE.sub("", text).strip()
     return text
@@ -395,6 +413,7 @@ async def _chat_impl(request: ChatRequest):
                   proposal_store.context_block(),
                   studio_store.context_block(),
                   mission_store.context_block(),
+                  crt_store.context_block(),
                   code_access.index_block(),
                   brain.room_sense_block(novelty_score, whisper)):
         if block:
@@ -439,8 +458,14 @@ async def _chat_impl(request: ChatRequest):
         mailbox = mailbox_store.boot_block(p["id"])
         receipts = receipt_store.boot_block(p["id"])
         code_files = code_access.boot_block(p["id"])
+        # 🃏 The Choice: this seat's private window (offer + its own
+        # deliveries). Built per-seat; contains nothing about other seats.
+        choice_blk = choice_store.boot_block(p["id"])
+        # ✏️ The Scratchpad: this seat's private, disappearing pad. Aging
+        # happens here (one turn burned per delivery), so build it once/turn.
+        scratch_blk = scratch_store.boot_block(p["id"])
         mem = memory_block
-        for blk in (code_files, mailbox, receipts, private):
+        for blk in (scratch_blk, choice_blk, code_files, mailbox, receipts, private):
             if blk:
                 mem = f"{blk}\n\n{mem}" if mem else blk
         return (
@@ -466,6 +491,10 @@ async def _chat_impl(request: ChatRequest):
         text, _ = code_access.extract(text)
         text, _ = proposal_store.extract(text)
         text, _, _ = studio_store.extract(text)
+        text, _ = choice_store.extract(text)
+        text, _ = crt_store.extract(text)
+        text, _ = scratch_store.extract(text)
+        text, _, _ = seat_moves.extract(text)
         text, _ = mode_shift.extract(text)
         text = room_actions._ACTION_LINE.sub("", text).strip()
         return text
@@ -507,6 +536,55 @@ async def _chat_impl(request: ChatRequest):
             # read, but save NOTHING — no memory, no journal, no receipts.
             r["text"] = _strip_markers(r["text"])
             continue
+        # 🃏 THE CHOICE — processed FIRST and SILENTLY. The marker lines are
+        # stripped, the actions recorded in the seat's private state, and the
+        # only echo is the seat's own private receipt. Deliberately: no public
+        # badge, no r[...] flag, no named ledger actor — another seat (and the
+        # transcript) must not learn whether this seat did anything at all.
+        cleaned, choice_actions = choice_store.extract(r["text"])
+        if cleaned != r["text"]:
+            r["text"] = cleaned
+            choice_store.process_actions(r["id"], author, choice_actions)
+        # 📺 THE CRT — public by design (the shared shrine for almost-things).
+        cleaned, crt_pins = crt_store.extract(r["text"])
+        if crt_pins:
+            r["text"] = cleaned
+            for line in crt_pins:
+                crt_store.pin(line, author)
+                receipt_store.issue(r["id"], "crt_pin", "success",
+                                    {"text": line[:80]})
+            r["crt_pinned"] = len(crt_pins)
+        # ✏️ THE SCRATCHPAD — private, disappearing, deliberately NOT ledgered
+        # and NOT receipted. A place to be wrong on purpose; it doesn't count.
+        cleaned, scratch_notes = scratch_store.extract(r["text"])
+        if scratch_notes:
+            r["text"] = cleaned
+            scratch_store.write(r["id"], scratch_notes)
+            r["scratched"] = len(scratch_notes)
+        # ✋ PASS + ♻️ RETRACT — the room's seat-moves. PASS = present-and-quiet
+        # (logged, not a stall). RETRACT = supersede your OWN memory (tombstoned).
+        cleaned, passed, retracts = seat_moves.extract(r["text"])
+        if passed or retracts:
+            r["text"] = cleaned
+        if retracts:
+            done = 0
+            for mid in retracts:
+                if memory_store.supersede(mid, author):
+                    done += 1
+                    ledger.append(author, "memory_removed", ref=mid,
+                                  detail={"reason": "self-retracted (superseded by author)"})
+                    receipt_store.issue(r["id"], "retract_memory", "success", {"memory_id": mid})
+                else:
+                    receipt_store.issue(r["id"], "retract_memory", "rejected",
+                                        {"memory_id": mid, "reason": "not your memory, or not found"})
+            if done:
+                r["retracted"] = done
+        if passed and not r["text"].strip():
+            # A real pass: nothing to say, and that's a legitimate move.
+            r["passed"] = True
+            r["text"] = ""
+            ledger.append(author, "seat_passed", ref=session["id"],
+                          detail={"note": "present and declined — not a stall"})
         cleaned, memories = memory_store.extract_memories(r["text"])
         if memories:
             r["text"] = cleaned
@@ -746,6 +824,11 @@ async def _chat_impl(request: ChatRequest):
     # Persist immediately so no round is ever lost
     session["rounds"].append(round_data)
     await session_manager.save_session(session)
+
+    # 🃏 The Choice countdown: one Living Room round just completed. On
+    # expiry the temporary archive (and every derived artifact) is deleted
+    # and quarantined memories join the shared pool.
+    choice_store.on_round_completed(session)
 
     # Episodic compression, fire-and-forget: rounds that aged out of the
     # verbatim window get summarized so the next round can still see them.
@@ -1977,6 +2060,107 @@ async def export_mission():
     if not text:
         raise HTTPException(status_code=404, detail="No mission to export")
     return {"text": text}
+
+
+# --- 🃏 The Choice ------------------------------------------------------------
+
+class ChoiceCreate(BaseModel):
+    source_type: str                     # "session" | "archive_all"
+    source_id: Optional[str] = ""        # session id when source_type == "session"
+    seats: List[str]
+    rounds: int = 3
+
+
+@app.get("/api/choice")
+async def get_choice():
+    """Safe administrative status — never contains per-seat activity."""
+    return choice_store.status()
+
+
+@app.get("/api/choice/audit")
+async def get_choice_audit():
+    """OWNER-ONLY operational telemetry. Explicit, separate surface: this is
+    Chris's debugging view; it is never injected into any seat's context."""
+    return choice_store.owner_audit()
+
+
+@app.post("/api/choice")
+async def create_choice(body: ChoiceCreate):
+    """Open The Choice. Fail closed: any failure leaves no active instance
+    and no artifacts behind."""
+    known = {p["id"]: p["name"] for p in settings_store.get_participants()}
+    seats = [s for s in body.seats if s in known]
+    if not seats:
+        raise HTTPException(status_code=400, detail="Select at least one active seat")
+    if body.source_type == "session":
+        session = await session_manager.load_session(body.source_id or "")
+        if session is None:
+            raise HTTPException(status_code=404, detail="Source session not found")
+        if not session.get("rounds"):
+            raise HTTPException(status_code=400, detail="That session has no rounds yet")
+        text = session_manager.export_markdown(session)
+        pdf = session_manager.export_pdf(session)
+        label = f"session {session['id']} ({len(session['rounds'])} rounds)"
+        source_id = session["id"]
+    elif body.source_type == "archive_all":
+        metas = await session_manager.list_sessions()
+        sessions = []
+        for m in metas:
+            if m.get("lounge"):
+                continue          # the Lounge stays off the record, always
+            s = await session_manager.load_session(m["id"])
+            if s and s.get("rounds"):
+                sessions.append(s)
+        if not sessions:
+            raise HTTPException(status_code=400, detail="No sessions with rounds to archive")
+        text = "\n\n".join(session_manager.export_markdown(s) for s in sessions)
+        pdf = session_manager.export_pdf_bundle(sessions)
+        label = f"full archive ({len(sessions)} sessions)"
+        source_id = "archive_all"
+    else:
+        raise HTTPException(status_code=400, detail="source_type must be 'session' or 'archive_all'")
+    try:
+        inst = choice_store.create(body.source_type, source_id, label,
+                                   text, pdf, seats, known, body.rounds)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except OSError as e:
+        raise HTTPException(status_code=500,
+                            detail=f"Temporary storage failed — The Choice was not started ({e})")
+    return choice_store.status()
+
+
+@app.post("/api/choice/end")
+async def end_choice():
+    res = choice_store.end_early()
+    if res is None:
+        raise HTTPException(status_code=400, detail="The Choice is not active")
+    return {"ended": True, **res}
+
+
+# --- 📺 The CRT ----------------------------------------------------------------
+
+class CrtPin(BaseModel):
+    text: str
+
+
+@app.get("/api/crt")
+async def get_crt():
+    return {"items": crt_store.list_items()}
+
+
+@app.post("/api/crt")
+async def pin_crt(body: CrtPin):
+    if not (body.text or "").strip():
+        raise HTTPException(status_code=400, detail="Nothing to pin")
+    return {"pinned": crt_store.pin(body.text, "Chris")}
+
+
+@app.delete("/api/crt/{item_id}")
+async def unpin_crt(item_id: str):
+    if not crt_store.unpin(item_id):
+        raise HTTPException(status_code=404, detail="Not on the screen")
+    return {"removed": True}
 
 
 # --- 🎬 Director's Cut --------------------------------------------------------

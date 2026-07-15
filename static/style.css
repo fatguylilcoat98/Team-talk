@@ -1968,3 +1968,51 @@ body.lounge-active {
     font: inherit;
 }
 .mission-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+
+/* 🃏 The Choice */
+#choice-panel { max-width: 640px; }
+.choice-setup { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
+.choice-lbl { font-size: 12px; font-weight: 600; color: var(--text-dim); margin-top: 6px; }
+.choice-setup select, #choice-panel select {
+    padding: 7px 9px; border-radius: 7px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); font: inherit;
+}
+.choice-seats { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.choice-seat { font-size: 13px; white-space: nowrap; }
+.choice-active { display: flex; flex-direction: column; gap: 6px; }
+.choice-live { font-size: 15px; margin-bottom: 4px; }
+.choice-stat { display: flex; justify-content: space-between; gap: 12px; font-size: 13px;
+    padding: 4px 0; border-bottom: 1px solid var(--border); }
+.choice-stat span { color: var(--text-dim); }
+.choice-actions { display: flex; gap: 8px; margin: 10px 0 4px; }
+.choice-audit-warn { font-size: 12px; color: #d9b25a; background: #2a2415;
+    border: 1px solid #6b5642; border-radius: 7px; padding: 7px 9px; margin: 8px 0; }
+
+/* 📺 The CRT — the graveyard television */
+.crt-screen {
+    min-height: 220px; border-radius: 12px; padding: 16px;
+    background: radial-gradient(ellipse at center, #14180f 0%, #0a0c07 100%);
+    border: 3px solid #2a2a2a; box-shadow: inset 0 0 60px rgba(0,0,0,0.7), 0 0 0 6px #1a1a1a;
+    color: #8fdc8f; font-family: "SF Mono", Consolas, monospace; overflow: hidden;
+    position: relative;
+}
+.crt-screen::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.18) 2px 4px);
+}
+.crt-static { text-align: center; padding-top: 70px; color: #4a6a4a; letter-spacing: 3px; }
+.crt-item {
+    display: flex; align-items: baseline; gap: 8px; padding: 5px 0; font-size: 13.5px;
+    text-shadow: 0 0 6px rgba(143,220,143,0.5);
+    animation: crt-flicker 3.5s infinite steps(1); opacity: 0.92;
+}
+.crt-text { flex: 1; }
+.crt-by { color: #5f9e5f; font-size: 11px; white-space: nowrap; }
+.crt-del { background: transparent; border: none; color: #4a6a4a; cursor: pointer; font-size: 12px; opacity: 0.5; }
+.crt-del:hover { opacity: 1; color: #8fdc8f; }
+@keyframes crt-flicker { 0%,97%{opacity:0.92} 98%{opacity:0.6} 99%{opacity:1} 100%{opacity:0.85} }
+.crt-pin-row { display: flex; gap: 8px; margin: 12px 0; }
+.crt-pin-row .mission-input { flex: 1; margin: 0; }
+
+/* ✋ a real PASS — present, quiet, not an error */
+.passed-note { color: var(--text-dim); font-style: italic; opacity: 0.7; }

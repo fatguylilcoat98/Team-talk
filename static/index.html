@@ -24,6 +24,7 @@
                 <button id="export-btn" title="Download conversation as Markdown">Export as Markdown</button>
                 <button id="pdf-btn" title="Download the conversation as a PDF file">&#128196; Export as PDF</button>
                 <button id="archive-btn" title="Pick sessions (or all of them) and download the whole record as one PDF">&#128218; Archive PDF</button>
+                <button id="choice-btn" title="The Choice — give each AI temporary, private access to an archive; each seat decides for itself what to do with it">&#127183; The Choice</button>
                 <button id="delete-btn" class="danger" title="Delete this session">Delete Session</button>
                 <button id="memory-btn" title="What the AIs remember across sessions">&#129504; Memory</button>
                 <button id="notebook-btn" title="The room's shared scratchpad — raw notes and pinned quotes">&#128211; Notebook</button>
@@ -42,6 +43,10 @@
             <div id="archive-list" class="archive-list"></div>
         </div>
 
+        <div id="choice-panel" class="archive-panel hidden">
+            <div id="choice-body"></div>
+        </div>
+
         <nav class="room-nav" aria-label="Room areas">
             <button data-area="foyer" title="The Foyer — orientation board">&#127963; Foyer</button>
             <button data-area="living" class="active" title="The Living Room — the conversation">&#128715; Living Room</button>
@@ -54,6 +59,7 @@
             <button data-area="proposals" title="Proposals — sealed ideas, blind debate, named at consequence">&#128229; Proposals</button>
             <button data-area="studio" title="The Studio — the creative room: seats pitch a build, the room votes, you build one a week">&#127912; Studio</button>
             <button data-area="mission" title="Mission Impossible — point the whole council at one hard question and run the gauntlet: register, discover, construct, red-team, verify">&#127919; Mission</button>
+            <button data-area="crt" title="The CRT — the graveyard television: deleted drafts, wrong guesses, and confident junk get to exist in the corner">&#128250; CRT</button>
         </nav>
 
         <div id="area-foyer" class="room-area hidden">
@@ -229,6 +235,16 @@
             <h3 class="nb-heading">&#127919; Mission Impossible</h3>
             <div id="mission-body" class="memory-list"></div>
             <p class="field-note">A hard question run as a process. The room moves through five phases — pre-register the win, discover blind, construct the strongest candidate, red-team it from every side, then verify. A checker rules when one exists; otherwise the honest output is a candidate for <strong>human review</strong>, never a claim that it's solved. Every phase change is a ledger event, so the genealogy of an idea is never lost.</p>
+        </div>
+
+        <div id="area-crt" class="room-area hidden">
+            <h3 class="nb-heading">&#128250; The CRT — the graveyard television</h3>
+            <div class="crt-screen" id="crt-screen" aria-live="polite"></div>
+            <div class="crt-pin-row">
+                <input id="crt-input" class="mission-input" placeholder="pin an almost-thing — a deleted draft, a wrong guess, a piece of confident junk…">
+                <button id="crt-pin-btn" class="primary">📌 Pin it</button>
+            </div>
+            <p class="field-note">The corner TV for almost-things. Deleted drafts, beautiful wrong guesses, confident junk — they get to exist here instead of vanishing. Any seat can pin one from chat with <code>CRT: &lt;line&gt;</code>. Nobody has to explain them. They just flicker.</p>
         </div>
 
         <div id="area-living" class="room-area">
