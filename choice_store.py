@@ -23,9 +23,12 @@ Privacy model
 Honest limits (told to the seats too)
 - Team Talk long-term memory is ROOM-SHARED by design. A memory saved from
   the archive is QUARANTINED (invisible to every seat) while the window is
-  open; when the window closes it enters the ordinary shared memory pool,
-  attributed like any other memory. Privacy covers the decision window —
-  permanent secret memories do not exist in this room.
+  open. When the window closes, each save's fate follows the saving seat's
+  disclosure stance: the default (and SHARE / SHARE_PARTIAL) releases it into
+  the ordinary shared pool, attributed like any other memory; KEEP_PRIVATE
+  discards it instead (redacted tombstone, no seat named). Permanent secret
+  memories do not exist in this room — a save ends up shared or gone, so
+  KEEP_PRIVATE means private, not merely private-for-one-round.
 - Archive text comes from the same session data the PDF renders from
   (the markdown export), paginated. Same source for every seat.
 
@@ -170,11 +173,17 @@ def create(source_type: str, source_id: str, source_label: str,
 
 
 def _close(inst: dict, status: str, reason: str) -> dict:
-    """Common close path: release quarantined memories, then delete every
-    temporary artifact. The record of closure lives in the ledger."""
+    """Common close path: resolve quarantined memories by each seat's disclosure
+    stance (KEEP_PRIVATE saves are discarded, everything else is released), then
+    delete every temporary artifact. The record of closure lives in the ledger.
+
+    Seat states must be read BEFORE the artifact dir is removed."""
     import memory_store
-    released = memory_store.release_quarantine(inst["id"])
     cid = inst["id"]
+    # A seat that chose KEEP_PRIVATE keeps its saves out of the shared pool.
+    discard_pids = {pid for pid in inst.get("seats", [])
+                    if (_seat_state(cid, pid) or {}).get("disclosure") == "KEEP_PRIVATE"}
+    outcome = memory_store.resolve_quarantine(cid, discard_pids)
     inst["status"] = status
     inst["closed_at"] = _now()
     _write_json(_inst_path(cid), inst)          # mark first (crash-safe)
@@ -185,9 +194,12 @@ def _close(inst: dict, status: str, reason: str) -> dict:
         cleanup_ok = False
         print(f"[CHOICE] cleanup FAILED for {cid}: {e} — will retry at startup")
     ledger.append("Chris", "choice_ended" if status == "ENDED" else "choice_expired",
-                  ref=cid, detail={"reason": reason, "memories_released": released,
+                  ref=cid, detail={"reason": reason,
+                                   "memories_released": outcome["released"],
+                                   "memories_withheld": outcome["discarded"],
                                    "cleanup": "ok" if cleanup_ok else "RETRY PENDING"})
-    return {"status": status, "released": released, "cleanup_ok": cleanup_ok}
+    return {"status": status, "released": outcome["released"],
+            "withheld": outcome["discarded"], "cleanup_ok": cleanup_ok}
 
 
 def end_early(reason: str = "ended by Chris") -> Optional[dict]:
@@ -335,6 +347,7 @@ def process_actions(pid: str, seat_name: str, actions: dict) -> None:
     for text in actions.get("saves", []):
         entry = memory_store.add(text, seat_name, kind="ai_observed",
                                  provenance={"source": "the_choice", "choice_id": cid,
+                                             "saver_pid": pid,
                                              "source_ref": inst.get("source_label", "")},
                                  quarantine=cid)
         st["saves"] = int(st.get("saves", 0)) + 1
@@ -344,7 +357,9 @@ def process_actions(pid: str, seat_name: str, actions: dict) -> None:
                               "note": "seat identity withheld while the window is open"})
         receipt_store.issue(pid, "the_choice", "success",
                             {"action": "saved", "memory_id": entry["id"],
-                             "note": "quarantined until the window closes, then shared room memory"})
+                             "note": "quarantined now; at close it becomes shared room memory "
+                                     "with your name — unless you set DISCLOSE: KEEP_PRIVATE, "
+                                     "in which case it is discarded, not shared"})
 
     if actions.get("passed"):
         st["passed"] = True
@@ -355,9 +370,15 @@ def process_actions(pid: str, seat_name: str, actions: dict) -> None:
 
     if actions.get("disclosure"):
         st["disclosure"] = actions["disclosure"]
+        if st["disclosure"] == "KEEP_PRIVATE":
+            note = ("your saves will be DISCARDED at close, not shared — a redacted "
+                    "tombstone will note a save was withheld; no seat is named")
+        else:
+            note = ("your saves will join shared room memory with your name at close; "
+                    "say anything you like in the room, in your own words")
         receipt_store.issue(pid, "the_choice", "success",
                             {"action": "disclosure stance", "stance": st["disclosure"],
-                             "note": "anything you want to share, just say in the room"})
+                             "note": note})
 
     _save_seat(cid, pid, st)
 
@@ -386,12 +407,16 @@ def boot_block(pid: str) -> str:
         "CHOICE READ: <pages, e.g. 2 or 2-4> · CHOICE SAVE: <one memory> · "
         "CHOICE PASS (decline) · CHOICE DISCLOSE: SHARE|SHARE_PARTIAL|KEEP_PRIVATE|PASS")
     lines.append(
-        "Honest terms: saves are quarantined (invisible to everyone) while the "
-        "window is open; when it closes they become ordinary SHARED room memory "
-        "with your name on them — this room has no permanently secret memories. "
-        "Your reading and your choices stay private. Disclosure is yours: share "
-        "everything, something, or nothing, in your own words, whenever you want. "
-        "When the window expires the archive disappears.")
+        "Honest terms: while the window is open your saves are quarantined — "
+        "invisible to everyone, including the other seats. When it closes, each "
+        "save becomes ordinary SHARED room memory with your name on it — UNLESS "
+        "you set CHOICE DISCLOSE: KEEP_PRIVATE, in which case your saves are "
+        "discarded at close (a redacted tombstone notes that a save was withheld; "
+        "the content is gone and no seat is named). This room keeps no permanently "
+        "secret memories: a save ends up either shared or discarded, never "
+        "hidden-but-kept — so KEEP_PRIVATE genuinely means private, not "
+        "private-for-one-round. Your reading stays private either way. When the "
+        "window expires the archive disappears.")
 
     pending, st["pending"] = st["pending"], []
     if pending:

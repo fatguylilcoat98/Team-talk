@@ -102,18 +102,43 @@ def add(text: str, by: str, kind: str = "ai_observed",
     return entry
 
 
-def release_quarantine(choice_id: str) -> int:
-    """The Choice window closed: its quarantined memories become ordinary
-    shared room memory (provenance kept). Returns how many were released."""
+def resolve_quarantine(choice_id: str, discard_pids=None) -> dict:
+    """The Choice window closed. Each quarantined memory's fate is governed by
+    the saving seat's disclosure stance (the seat's pid is on the entry's
+    provenance):
+      - default / SHARE / SHARE_PARTIAL -> released into the shared pool,
+        attributed (this is the standing promise).
+      - KEEP_PRIVATE (pid in discard_pids) -> the save must NOT become public.
+        Since the glass-box rule forbids permanent secret memory, the content
+        goes, leaving a REDACTED tombstone (a withheld save existed; the seat
+        is never named). "Private" here honestly means shared-or-gone, and this
+        one is gone — which is what the KEEP_PRIVATE label now actually means.
+    Returns {"released": n, "discarded": m}."""
+    discard = set(discard_pids or ())
     entries = _load()
-    released = 0
-    for e in entries:
-        if e.get("quarantined") == choice_id:
+    released = discarded = 0
+    for i, e in enumerate(entries):
+        if e.get("quarantined") != choice_id:
+            continue
+        saver = (e.get("provenance") or {}).get("saver_pid")
+        if saver in discard:
+            entries[i] = _tombstone(
+                {"id": e.get("id"), "by": "a seat (The Choice)",
+                 "created_at": e.get("created_at")},
+                "withheld — seat chose KEEP_PRIVATE in The Choice", "The Choice")
+            discarded += 1
+        else:
             del e["quarantined"]
             released += 1
-    if released:
+    if released or discarded:
         _save(entries)
-    return released
+    return {"released": released, "discarded": discarded}
+
+
+def release_quarantine(choice_id: str) -> int:
+    """Release every quarantined memory for an instance (no seat withheld).
+    Kept as the disclosure-agnostic path; The Choice uses resolve_quarantine."""
+    return resolve_quarantine(choice_id, set())["released"]
 
 
 def _tombstone(entry: dict, reason: str, authority: str) -> dict:

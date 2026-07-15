@@ -126,17 +126,38 @@ def run():
     assert "saves" not in str(pub) and "pages_read" not in str(pub)
     ok("owner audit sees per-seat; public status does not")
 
-    # 15/17/18. Expiry after N real rounds deletes artifacts; saves persist & release
+    # Aya saves and chooses to SHARE — the release path (must publish at close).
+    act("p_a", "Aya", "CHOICE SAVE: Aya shares this one\nCHOICE DISCLOSE: SHARE")
+    assert C._seat_state(cid, "p_a")["disclosure"] == "SHARE"
+
+    # 15/17/18. Expiry: SHARE saves release attributed; KEEP_PRIVATE saves are
+    # discarded — the label now governs the mechanism (the room's Round-2 fix).
     C.on_round_completed({"lounge": True})   # lounge round must NOT count
     assert C.active_instance() is not None
     for _ in range(3):
         C.on_round_completed({"lounge": False})
     assert C.active_instance() is None, "should have expired after 3 living-room rounds"
     assert not os.path.exists(C._inst_dir(cid)), "temp artifacts must be deleted at expiry"
-    released = [e for e in M._load() if e.get("provenance", {}).get("source") == "the_choice"]
-    assert len(released) == 2 and all("quarantined" not in e for e in released)
-    assert "Ben keeps one thing" in M.context_block(), "released saves must join shared memory"
-    ok("15/17/18 expiry deletes temp files; saves persist + release to shared pool")
+    shared = M.context_block()
+    # Aya (SHARE) -> released into the shared pool, attributed, no longer quarantined
+    aya_live = [e for e in M._load() if e.get("by") == "Aya" and not e.get("tombstone")]
+    assert aya_live and "quarantined" not in aya_live[0], "SHARE save must release"
+    assert "Aya shares this one" in shared, "SHARE save must reach shared memory"
+    # Ben (KEEP_PRIVATE) -> discarded: no live save, content gone from shared memory
+    assert not [e for e in M._load() if e.get("by") == "Ben" and not e.get("tombstone")], \
+        "KEEP_PRIVATE seat must have no live save left"
+    assert "Ben keeps one thing" not in shared, "KEEP_PRIVATE save must NOT reach shared memory"
+    ok("15/17/18 expiry deletes temp files; SHARE releases, KEEP_PRIVATE discards")
+
+    # 15b. KEEP_PRIVATE discards leave a REDACTED tombstone (glass box, no name)
+    tombs = [e for e in M._load() if e.get("tombstone") and "KEEP_PRIVATE" in (e.get("reason") or "")]
+    assert len(tombs) == 2, f"expected 2 withheld tombstones (Ben's saves), got {len(tombs)}"
+    assert all(t.get("original_by") == "a seat (The Choice)" for t in tombs), \
+        "a withheld tombstone must never name the seat"
+    ev = [e for e in ledger._read_all() if e.get("action") == "choice_expired"][-1]
+    assert ev["detail"]["memories_released"] == 1 and ev["detail"]["memories_withheld"] == 2, \
+        "close event must report released + withheld counts"
+    ok("15b KEEP_PRIVATE discard is honest: redacted tombstone + ledgered counts")
 
     # 16. Manual early termination
     make(seats=("p_a",), rounds=5)

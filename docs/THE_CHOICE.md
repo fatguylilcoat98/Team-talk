@@ -54,18 +54,31 @@ private operational telemetry and is **never** put into any seat's context.
 Team Talk's long-term memory is **room-shared by design** — this room keeps no
 permanently secret memories. So a memory saved from the archive is
 **quarantined** (invisible to every seat's context) *while the window is open*.
-When the window closes, quarantined memories join the ordinary **shared** memory
-pool, attributed to the seat that saved them, tagged with provenance
-(`source: the_choice`, the instance id, and the source reference).
 
-This is the synthesis of two seat concerns from the design session:
+When the window closes, each save's fate follows the saving seat's **disclosure
+stance**:
+- default / `SHARE` / `SHARE_PARTIAL` → **released** into the ordinary shared
+  pool, attributed to the seat, tagged with provenance (`source: the_choice`,
+  the instance id, the saver, and the source reference).
+- `KEEP_PRIVATE` → **discarded**. The content goes; a **redacted** tombstone
+  records that a save was withheld (no seat is named). Because the glass-box
+  rule forbids permanent secret memory, "private" here honestly means the save
+  is gone, not hidden-but-kept.
+
+This is the synthesis of the seat concerns from the design session — plus the
+Round-2 correction:
 - Claude / Muse wanted the decision **private during the window** (so choosing
   isn't performed).
 - Gemini warned that permanent private memory would **splinter the council**
   into "four disparate instances."
+- In Round 2, Claude and Muse caught that a `KEEP_PRIVATE` label was theatre if
+  the save went public anyway when the window closed. So the disclosure stance
+  now **governs the mechanism**: `KEEP_PRIVATE` genuinely keeps the save out of
+  shared memory (by discarding it), and the label no longer promises a
+  permanence it can't deliver.
 
-Quarantine-then-release satisfies both: private while deciding, shared once
-decided.
+Quarantine-then-resolve satisfies all of it: private while deciding; then
+shared-and-attributed, or discarded, exactly as the seat chose.
 
 ## Expiration & temporary-file lifecycle
 
@@ -73,8 +86,10 @@ The countdown is measured in **Living Room rounds** (Lounge rounds do not
 count — this is labelled everywhere). When the window expires — or Chris ends
 it early, or the session is deleted — the entire instance directory is deleted:
 the temporary PDF copy, the extracted page text, per-seat cursors/state, and
-receipts references. Deliberately-saved permanent memories remain (with
-provenance); voluntary public disclosures remain in the transcript.
+receipts references. Saves that were **released** (default / SHARE) remain as
+shared memory with provenance; saves the seat marked **KEEP_PRIVATE** are
+discarded (redacted tombstone); voluntary public disclosures remain in the
+transcript.
 
 Expiry lives **on disk, not in a timer**, so an active window survives a
 restart. `choice_store.startup_cleanup()` runs at boot and purges any
@@ -102,7 +117,7 @@ transcript and processed silently:
 | `CHOICE READ: 2` / `2-4` / `1,3` | those pages arrive next turn (≤3/req) |
 | `CHOICE SAVE: <text>` | one quarantined, provenance-tagged memory |
 | `CHOICE PASS` | explicitly decline (private, no penalty) |
-| `CHOICE DISCLOSE: SHARE\|SHARE_PARTIAL\|KEEP_PRIVATE\|PASS` | your stance, recorded privately |
+| `CHOICE DISCLOSE: SHARE\|SHARE_PARTIAL\|KEEP_PRIVATE\|PASS` | your stance — and it **governs release**: KEEP_PRIVATE discards your saves at close, anything else releases them attributed |
 
 The seat's private instruction never says "review this" or "save the important
 parts" — it says the archive is *available*, that inspecting or ignoring it are
@@ -128,7 +143,9 @@ equally fine, and that there is no correct answer.
 ## Known limitations
 
 - Memory is shared-on-release by architecture; permanent per-seat-private memory
-  does not exist in this room (by design — see "The honest limit").
+  does not exist in this room (by design — see "The honest limit"). A save is
+  either released-and-attributed or discarded; the seat chooses which via
+  `CHOICE DISCLOSE`, but it cannot keep a hidden durable memory.
 - The archive is delivered as extracted page text, paginated. Very large
   archives are chunked, not truncated silently; the page count is shown to the
   seat.
