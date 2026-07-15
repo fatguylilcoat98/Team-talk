@@ -171,6 +171,198 @@ document.getElementById('archive-download').addEventListener('click', async () =
     archivePanel.classList.add('hidden');
 });
 
+// --- 🃏 The Choice: private, temporary archive review ----------------------
+
+const choicePanel = document.getElementById('choice-panel');
+let choiceShowAudit = false;
+
+document.getElementById('choice-btn').addEventListener('click', () => {
+    if (!choicePanel.classList.contains('hidden')) {
+        choicePanel.classList.add('hidden');
+        return;
+    }
+    choicePanel.classList.remove('hidden');
+    renderChoice();
+});
+
+async function renderChoice() {
+    const body = document.getElementById('choice-body');
+    if (!body) return;
+    let st;
+    try {
+        const res = await fetch('/api/choice');
+        if (res.status === 404) { body.innerHTML = choiceRestartHint(); return; }
+        st = await res.json();
+    } catch (e) { body.innerHTML = '<p class="field-note">Could not reach The Choice.</p>'; return; }
+    body.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'archive-head';
+    head.innerHTML = '<strong>🃏 The Choice</strong>' +
+        '<span class="field-note" style="flex:1"> — each seat gets the same archive, privately, and decides for itself.</span>' +
+        '<button id="choice-close">✕</button>';
+    body.appendChild(head);
+    head.querySelector('#choice-close').addEventListener('click', () => choicePanel.classList.add('hidden'));
+
+    if (st.active) { renderChoiceActive(body, st); }
+    else { renderChoiceSetup(body); }
+}
+
+function choiceRestartHint() {
+    return '<p class="field-note">The Choice needs a server restart — run: sudo systemctl restart team-talk</p>';
+}
+
+async function renderChoiceSetup(body) {
+    // Step 1 — source
+    const box = document.createElement('div');
+    box.className = 'choice-setup';
+    box.innerHTML =
+        '<div class="field-note">Give every selected seat temporary, <strong>private</strong> access to an archive. ' +
+        'No one is required to read it or save anything, and no seat can see what another seat does with it.</div>' +
+        '<label class="choice-lbl">Source</label>' +
+        '<select id="choice-src">' +
+        '<option value="session">this session</option>' +
+        '<option value="pick">another session…</option>' +
+        '<option value="archive_all">the full archive (all sessions)</option>' +
+        '</select>' +
+        '<div id="choice-pick-wrap" class="hidden"><select id="choice-pick"></select></div>' +
+        '<label class="choice-lbl">Seats (each decides independently)</label>' +
+        '<div id="choice-seats" class="choice-seats"></div>' +
+        '<label class="choice-lbl">Expires after</label>' +
+        '<select id="choice-rounds">' +
+        '<option value="1">1 Living Room round</option>' +
+        '<option value="3" selected>3 Living Room rounds</option>' +
+        '<option value="5">5 Living Room rounds</option>' +
+        '<option value="10">10 Living Room rounds</option>' +
+        '<option value="50">end of session (50)</option>' +
+        '</select>' +
+        '<div class="field-note">Countdown is in <strong>Living Room rounds</strong> — Lounge rounds do not count. ' +
+        'When it expires, the temporary archive is deleted; anything a seat deliberately saved becomes ordinary shared memory.</div>' +
+        '<button id="choice-start" class="primary">🃏 Start The Choice</button>';
+    body.appendChild(box);
+
+    // populate seats + sessions
+    let seats = [], sessions = [];
+    try { seats = (await (await fetch('/api/settings')).json()).participants || []; } catch (e) {}
+    try { sessions = (await (await fetch('/api/sessions')).json()).sessions || []; } catch (e) {}
+    const seatsEl = document.getElementById('choice-seats');
+    for (const p of seats.filter((s) => !s.resting)) {
+        const l = document.createElement('label');
+        l.className = 'choice-seat';
+        l.innerHTML = `<input type="checkbox" class="choice-seat-pick" value="${escapeText(p.id)}" checked> ${escapeText(p.name)}`;
+        seatsEl.appendChild(l);
+    }
+    const pick = document.getElementById('choice-pick');
+    for (const s of sessions) {
+        const o = document.createElement('option');
+        o.value = s.id; o.textContent = `${s.id} (${s.rounds} rounds)`;
+        pick.appendChild(o);
+    }
+    document.getElementById('choice-src').addEventListener('change', (e) => {
+        document.getElementById('choice-pick-wrap').classList.toggle('hidden', e.target.value !== 'pick');
+    });
+    document.getElementById('choice-start').addEventListener('click', startChoice);
+}
+
+async function startChoice() {
+    const srcSel = document.getElementById('choice-src').value;
+    const chosenSeats = [...document.querySelectorAll('.choice-seat-pick:checked')].map((b) => b.value);
+    if (!chosenSeats.length) { alert('Pick at least one seat.'); return; }
+    let payload = { seats: chosenSeats, rounds: parseInt(document.getElementById('choice-rounds').value, 10) };
+    if (srcSel === 'archive_all') { payload.source_type = 'archive_all'; }
+    else if (srcSel === 'pick') { payload.source_type = 'session'; payload.source_id = document.getElementById('choice-pick').value; }
+    else { payload.source_type = 'session'; payload.source_id = currentSessionId; }
+    if (payload.source_type === 'session' && !payload.source_id) { alert('No session selected — start or pick one first.'); return; }
+    const res = await fetch('/api/choice', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) { alert((await res.json().catch(() => ({}))).detail || 'Could not start The Choice.'); return; }
+    renderChoice();
+}
+
+function renderChoiceActive(body, st) {
+    const card = document.createElement('div');
+    card.className = 'choice-active';
+    card.innerHTML =
+        '<div class="choice-live">🟢 The Choice is <strong>active</strong></div>' +
+        `<div class="choice-stat"><span>Source</span><b>${escapeText(st.source)}</b></div>` +
+        `<div class="choice-stat"><span>Seats</span><b>${escapeText((st.seats || []).join(', '))}</b></div>` +
+        `<div class="choice-stat"><span>Expires</span><b>${st.rounds_remaining} of ${st.expiry_rounds} rounds left</b></div>` +
+        `<div class="field-note">${escapeText(st.countdown_unit || '')}</div>` +
+        '<div class="choice-actions">' +
+        '<button id="choice-end-btn" class="danger">End The Choice now</button>' +
+        '<button id="choice-audit-btn">🔒 Owner debug view</button>' +
+        '</div>' +
+        '<div class="field-note">What each seat did stays private. The panel above shows only safe status — never a seat\'s reading or saves.</div>' +
+        '<div id="choice-audit" class="hidden"></div>';
+    body.appendChild(card);
+    document.getElementById('choice-end-btn').addEventListener('click', async () => {
+        if (!confirm('End The Choice now? The archive is deleted; anything a seat saved becomes shared memory.')) return;
+        await fetch('/api/choice/end', { method: 'POST' });
+        renderChoice();
+    });
+    document.getElementById('choice-audit-btn').addEventListener('click', toggleChoiceAudit);
+    if (choiceShowAudit) { toggleChoiceAudit(true); }
+}
+
+async function toggleChoiceAudit(force) {
+    const el = document.getElementById('choice-audit');
+    if (!el) return;
+    choiceShowAudit = (force === true) ? true : el.classList.contains('hidden');
+    if (!choiceShowAudit) { el.classList.add('hidden'); return; }
+    let a;
+    try { a = await (await fetch('/api/choice/audit')).json(); } catch (e) { return; }
+    el.classList.remove('hidden');
+    el.innerHTML =
+        '<div class="choice-audit-warn">🔒 PRIVATE OPERATIONAL TELEMETRY — owner debugging only. ' +
+        'The seats never see this; it is never put into any AI\'s context.</div>' +
+        (a.seats || []).map((s) =>
+            `<div class="choice-stat"><span>${escapeText(s.seat)}</span>` +
+            `<b>${escapeText(s.status)} · ${s.pages_read} pages · ${s.saves} saved · disclose: ${escapeText(s.disclosure)}</b></div>`
+        ).join('');
+}
+
+// --- 📺 The CRT: the graveyard television ----------------------------------
+
+async function renderCrt() {
+    const screen = document.getElementById('crt-screen');
+    if (!screen) return;
+    let items = [];
+    try {
+        const res = await fetch('/api/crt');
+        if (res.status === 404) { screen.innerHTML = '<p class="field-note">The CRT needs a server restart.</p>'; return; }
+        items = (await res.json()).items || [];
+    } catch (e) { screen.innerHTML = '<p class="field-note">Static.</p>'; return; }
+    if (!items.length) {
+        screen.innerHTML = '<div class="crt-static">— static —<br><span class="field-note">nothing pinned yet</span></div>';
+        return;
+    }
+    screen.innerHTML = '';
+    items.slice().reverse().forEach((it, i) => {
+        const row = document.createElement('div');
+        row.className = 'crt-item';
+        row.style.animationDelay = `${(i % 6) * 0.4}s`;
+        row.innerHTML = `<span class="crt-text">“${escapeText(it.text)}”</span>` +
+            `<span class="crt-by">— ${escapeText(it.by)}</span>` +
+            `<button class="crt-del" title="take it off the screen" data-id="${escapeText(it.id)}">✕</button>`;
+        screen.appendChild(row);
+    });
+    for (const b of screen.querySelectorAll('.crt-del')) {
+        b.addEventListener('click', async () => {
+            await fetch(`/api/crt/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE' });
+            renderCrt();
+        });
+    }
+}
+
+document.getElementById('crt-pin-btn')?.addEventListener('click', async () => {
+    const inp = document.getElementById('crt-input');
+    const text = inp.value.trim();
+    if (!text) return;
+    await fetch('/api/crt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    inp.value = '';
+    renderCrt();
+});
+
 deleteBtn.addEventListener('click', async () => {
     if (!currentSessionId) {
         alert('No active session to delete.');
@@ -741,7 +933,12 @@ function aiBubble(resp, allNames = [], reveal = false) {
 
     const body = document.createElement('div');
     body.className = 'bubble-text';
-    body.textContent = resp.text || '';
+    if (resp.passed && !(resp.text || '').trim()) {
+        body.className = 'bubble-text passed-note';
+        body.textContent = '— passed (present, nothing to add this round) —';
+    } else {
+        body.textContent = resp.text || '';
+    }
     el.appendChild(body);
 
     // 💾 Pull this line into long-term memory — the manual save (the only way
@@ -769,6 +966,9 @@ function aiBubble(resp, allNames = [], reveal = false) {
         if (resp.questions_asked) extra += '  ·  ❓ asked Chris a question';
         if (resp.mail_sent) extra += '  ·  📬 left mail';
         if (resp.about_written) extra += '  ·  🪪 updated About Me';
+        if (resp.crt_pinned) extra += `  ·  📺 pinned to the CRT`;
+        if (resp.scratched) extra += `  ·  ✏️ scratchpad`;
+        if (resp.retracted) extra += `  ·  ♻️ retracted ${resp.retracted === 1 ? 'a memory' : resp.retracted + ' memories'}`;
         if (resp.studio_pitched) extra += '  ·  🎨 pitched to the Studio';
         if (resp.studio_voted) extra += `  ·  🗳️ voted ${resp.studio_voted}`;
         if (resp.room_actions) {
@@ -1737,7 +1937,7 @@ function deviceContext() {
 
 // --- Area navigation
 const roomNav = document.querySelector('.room-nav');
-const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals', 'studio'];
+const AREAS = ['foyer', 'living', 'wall', 'desks', 'history', 'train', 'workshop', 'night', 'proposals', 'studio', 'mission', 'crt'];
 
 function showArea(area) {
     if (!AREAS.includes(area)) area = 'living';
@@ -1757,6 +1957,8 @@ function showArea(area) {
     if (area === 'night') renderNight();
     if (area === 'proposals') renderProposals();
     if (area === 'studio') renderStudio();
+    if (area === 'mission') renderMission();
+    if (area === 'crt') renderCrt();
 }
 
 roomNav.addEventListener('click', (e) => {
@@ -1857,6 +2059,259 @@ async function buildStudio(pitchId) {
         renderStudio();
     } catch (e) {
         alert('Could not reach the room.');
+    }
+}
+
+// --- 🎯 Mission Impossible (the hard-question process)
+const MISSION_STEPS = ['register', 'discovery', 'construction', 'red_team', 'verification'];
+const MISSION_STEP_LABEL = {
+    register: '0 · Pre-register', discovery: '1 · Discovery', construction: '2 · Construction',
+    red_team: '3 · Red Team', verification: '4 · Verification',
+};
+
+async function missionPost(path, body) {
+    try {
+        const res = await fetch(path, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {}),
+        });
+        if (!res.ok) { alert((await res.json().catch(() => ({}))).detail || 'Request failed.'); return null; }
+        return await res.json();
+    } catch (e) { alert('Could not reach the room.'); return null; }
+}
+
+async function renderMission() {
+    const el = document.getElementById('mission-body');
+    if (!el) return;
+    let data;
+    try {
+        const res = await fetch('/api/mission');
+        if (res.status === 404) { el.innerHTML = '<p class="empty-hint">Mission Impossible needs a server restart — run: sudo systemctl restart team-talk</p>'; return; }
+        data = await res.json();
+    } catch (e) { el.innerHTML = '<p class="empty-hint">Could not load Mission Impossible.</p>'; return; }
+    el.innerHTML = '';
+    const m = data.active;
+
+    // The active mission, or the create form.
+    if (!m) {
+        const box = document.createElement('div');
+        box.className = 'memory-item';
+        box.innerHTML =
+            '<div class="memory-text"><strong>Point the whole council at one hard question.</strong>' +
+            '<div class="field-note">A structured gauntlet: pre-register what counts as progress, discover blind, ' +
+            'build the strongest candidate, then everyone switches sides and tries to break it. The honest output is ' +
+            'a candidate for human review — never a claim that it’s solved.</div></div>';
+        const q = document.createElement('textarea');
+        q.id = 'mission-q'; q.rows = 3; q.placeholder = 'The impossible question (an open problem, a hard claim to stress-test)…';
+        q.className = 'mission-input';
+        const noteRow = document.createElement('div');
+        noteRow.className = 'field-note';
+        noteRow.innerHTML = 'Is it mechanically checkable? ' +
+            '<select id="mission-checker"><option value="none">no checker — human review</option>' +
+            '<option value="script">yes — a code/proof checker will rule</option>' +
+            '<option value="manual">Chris checks by hand</option></select>';
+        const start = document.createElement('button');
+        start.className = 'primary'; start.textContent = '🎯 Open the mission';
+        start.addEventListener('click', async () => {
+            const question = q.value.trim();
+            if (!question) { alert('The mission needs a question.'); return; }
+            const checker = document.getElementById('mission-checker').value;
+            const r = await missionPost('/api/mission', { question, checker_mode: checker });
+            if (r) renderMission();
+        });
+        box.appendChild(q); box.appendChild(noteRow); box.appendChild(start);
+        el.appendChild(box);
+        renderMissionClosed(el, data.closed);
+        return;
+    }
+
+    // Phase rail
+    const rail = document.createElement('div');
+    rail.className = 'mission-rail';
+    for (const s of MISSION_STEPS) {
+        const chip = document.createElement('span');
+        const done = MISSION_STEPS.indexOf(s) < MISSION_STEPS.indexOf(m.phase);
+        chip.className = 'mission-chip' + (s === m.phase ? ' active' : (done ? ' done' : ''));
+        chip.textContent = MISSION_STEP_LABEL[s];
+        rail.appendChild(chip);
+    }
+
+    const head = document.createElement('div');
+    head.className = 'memory-item';
+    head.innerHTML =
+        `<div class="memory-text"><strong>${escapeText(m.question)}</strong></div>` +
+        `<div class="memory-meta">attempt #${m.attempt_count} · ${escapeText(m.phase_title)}` +
+        (m.checker_mode !== 'none' ? ` · checker: ${escapeText(m.checker_mode)}` : '') + '</div>';
+    head.appendChild(rail);
+    if (m.registration && m.registration.sealed) {
+        const reg = document.createElement('div');
+        reg.className = 'night-msg';
+        reg.innerHTML = `🔒 <strong>Sealed win criteria:</strong> ${escapeText(m.registration.criteria)}`;
+        head.appendChild(reg);
+    }
+    if (m.orders) {
+        const orders = document.createElement('div');
+        orders.className = 'mission-orders';
+        orders.textContent = m.orders;
+        head.appendChild(orders);
+    }
+    el.appendChild(head);
+
+    // Phase-specific control
+    if (m.phase === 'register' && !(m.registration && m.registration.sealed)) {
+        const box = document.createElement('div');
+        box.className = 'memory-item';
+        box.innerHTML = '<div class="field-note">Lock in what would count as real progress on THIS question. ' +
+            'The room can also seal it from chat with a PROPOSAL: line — this is the manual capture.</div>';
+        const c = document.createElement('textarea');
+        c.rows = 2; c.className = 'mission-input'; c.placeholder = 'e.g. "an explicit construction beating the known bound of X", or "a hidden assumption in the standard attack, named precisely"…';
+        const seal = document.createElement('button');
+        seal.className = 'primary'; seal.textContent = '🔒 Seal the win criteria';
+        seal.addEventListener('click', async () => {
+            if (!c.value.trim()) { alert('Say what winning means first.'); return; }
+            const r = await missionPost('/api/mission/seal', { criteria: c.value.trim() });
+            if (r) renderMission();
+        });
+        box.appendChild(c); box.appendChild(seal);
+        el.appendChild(box);
+    }
+
+    const cur = m.current_attempt || {};
+    if (m.phase === 'construction') {
+        el.appendChild(missionCapture('Record the strongest candidate the room built:',
+            '/api/mission/candidate', 'text', '💾 Save candidate', cur.candidate));
+    }
+    if (m.phase === 'red_team' || m.phase === 'verification') {
+        if (cur.candidate) {
+            const cand = document.createElement('div');
+            cand.className = 'memory-item';
+            cand.innerHTML = `<div class="memory-text">🧩 <strong>Candidate on the table:</strong> ${escapeText(cur.candidate)}</div>`;
+            el.appendChild(cand);
+        }
+        if (m.phase === 'red_team') {
+            el.appendChild(missionBreakForm());
+        }
+        const breaks = (cur.breaks || []);
+        if (breaks.length) {
+            const bl = document.createElement('div');
+            bl.className = 'memory-item';
+            bl.innerHTML = `<div class="memory-meta">${breaks.length} break${breaks.length === 1 ? '' : 's'} logged — a survivor must answer every one</div>`;
+            for (const b of breaks) {
+                const row = document.createElement('div');
+                row.className = 'night-msg';
+                row.innerHTML = `💥 <strong>${escapeText(b.by)}:</strong> ${escapeText(b.text)}`;
+                bl.appendChild(row);
+            }
+            el.appendChild(bl);
+        }
+    }
+
+    // Advance / close controls
+    const controls = document.createElement('div');
+    controls.className = 'mission-controls';
+    const adv = document.createElement('button');
+    adv.className = 'primary';
+    adv.textContent = m.phase === 'verification' ? '↻ New attempt (run the gauntlet again)' : `→ Advance to ${MISSION_STEP_LABEL[MISSION_STEPS[MISSION_STEPS.indexOf(m.phase) + 1]] || 'next'}`;
+    adv.addEventListener('click', async () => {
+        const r = await missionPost('/api/mission/advance', {});
+        if (r) renderMission();
+    });
+    controls.appendChild(adv);
+
+    const exp = document.createElement('button');
+    exp.textContent = '📤 Export for human review';
+    exp.addEventListener('click', missionExport);
+    controls.appendChild(exp);
+    el.appendChild(controls);
+
+    // Close with an honest outcome
+    const closeBox = document.createElement('div');
+    closeBox.className = 'memory-item';
+    closeBox.innerHTML = '<div class="field-note">Close the mission with an honest outcome:</div>';
+    const sel = document.createElement('select');
+    sel.id = 'mission-outcome';
+    for (const [k, v] of Object.entries(data.outcomes)) {
+        const o = document.createElement('option'); o.value = k; o.textContent = v; sel.appendChild(o);
+    }
+    const note = document.createElement('input');
+    note.id = 'mission-close-note'; note.placeholder = 'one honest line (optional)'; note.className = 'mission-input';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'danger'; closeBtn.textContent = 'Close mission';
+    closeBtn.addEventListener('click', async () => {
+        if (!confirm('Close this mission?')) return;
+        const r = await missionPost('/api/mission/close', {
+            outcome: sel.value, note: note.value.trim(),
+        });
+        if (r) renderMission();
+    });
+    closeBox.appendChild(sel); closeBox.appendChild(note); closeBox.appendChild(closeBtn);
+    el.appendChild(closeBox);
+
+    renderMissionClosed(el, data.closed);
+}
+
+function missionCapture(label, path, field, btnText, existing) {
+    const box = document.createElement('div');
+    box.className = 'memory-item';
+    box.innerHTML = `<div class="field-note">${label}</div>`;
+    const ta = document.createElement('textarea');
+    ta.rows = 3; ta.className = 'mission-input'; ta.value = existing || '';
+    const btn = document.createElement('button');
+    btn.className = 'primary'; btn.textContent = btnText;
+    btn.addEventListener('click', async () => {
+        if (!ta.value.trim()) { alert('Nothing to save.'); return; }
+        const r = await missionPost(path, { [field]: ta.value.trim() });
+        if (r) renderMission();
+    });
+    box.appendChild(ta); box.appendChild(btn);
+    return box;
+}
+
+function missionBreakForm() {
+    const box = document.createElement('div');
+    box.className = 'memory-item';
+    box.innerHTML = '<div class="field-note">Log a red-team break against the candidate:</div>';
+    const who = document.createElement('input');
+    who.placeholder = 'who found it (seat name)'; who.className = 'mission-input';
+    const what = document.createElement('textarea');
+    what.rows = 2; what.className = 'mission-input'; what.placeholder = 'the flaw, the counterexample, the hidden assumption…';
+    const btn = document.createElement('button');
+    btn.textContent = '💥 Log the break';
+    btn.addEventListener('click', async () => {
+        if (!what.value.trim()) { alert('An empty break is not a break.'); return; }
+        const r = await missionPost('/api/mission/break', { by: who.value.trim() || 'the room', text: what.value.trim() });
+        if (r) renderMission();
+    });
+    box.appendChild(who); box.appendChild(what); box.appendChild(btn);
+    return box;
+}
+
+async function missionExport() {
+    try {
+        const res = await fetch('/api/mission/export');
+        if (!res.ok) { alert('Nothing to export yet.'); return; }
+        const { text } = await res.json();
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'mission-for-human-review.txt'; a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) { alert('Could not export.'); }
+}
+
+function renderMissionClosed(el, closed) {
+    if (!closed || !closed.length) return;
+    const h = document.createElement('div');
+    h.className = 'field-note'; h.style.marginTop = '1rem'; h.textContent = 'Past missions';
+    el.appendChild(h);
+    for (const m of closed) {
+        const item = document.createElement('div');
+        item.className = 'memory-item';
+        const outcome = (m.outcome || 'closed').replace(/_/g, ' ');
+        item.innerHTML =
+            `<div class="memory-text">${escapeText(m.question)}</div>` +
+            `<div class="memory-meta">${m.attempt_count} attempt${m.attempt_count === 1 ? '' : 's'} · ${escapeText(outcome)}</div>`;
+        el.appendChild(item);
     }
 }
 
