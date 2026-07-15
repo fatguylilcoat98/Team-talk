@@ -16,3 +16,6 @@ directors_cut/
 games/
 workshop/
 logs/
+
+# surfacer generated reports (archive-derived)
+surfacer/reports/
