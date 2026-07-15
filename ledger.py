@@ -70,6 +70,8 @@ ACTIONS = {
     "seat_passed",
     # a corrupt/truncated session file, set aside instead of silently clobbered
     "session_quarantined",
+    # 🔎 the surfacer resolution layer — durable, attributed, hash-chained
+    "surfacer_source", "surfacer_challenge",
 }
 
 
