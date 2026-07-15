@@ -365,7 +365,7 @@ def write_reports(out_dir, candidates, seats, scan_meta, registry, control_regis
     # --- machine-readable baseline report ---
     report = {
         "generated_at": generated,
-        "matcher": "surfacer/matcher.py (frozen, 19 tests passing)",
+        "matcher": extra.get("matcher_used", "surfacer/matcher.py (frozen, 19 tests passing)"),
         "claim_identity": "(entity, value)",
         "flag_identity": "(seat_id, normalized_entity, value) — repeat-rate keys on this",
         "registry_seed": [{"entity": e, "value": v} for e, v in registry.pairs()],
@@ -455,6 +455,9 @@ def main():
     ap.add_argument("--sessions-dir", default=DEFAULT_SESSIONS_DIR)
     ap.add_argument("--ledger-path", default=DEFAULT_LEDGER_PATH)
     ap.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
+    ap.add_argument("--aliases", default="",
+                    help="optional JSON: [[entity, value, alias], ...] — switches to the "
+                         "matcher_v2 recall extension. Run with and without it to diff v1 vs v2.")
     ap.add_argument("--reviewed-candidates", default="",
                     help="optional JSON file: [[entity, value], ...] approved by a human")
     args = ap.parse_args()
@@ -481,9 +484,25 @@ def main():
                 reviewed = [(str(e), str(v)) for e, v in json.load(f)]
         except (OSError, ValueError, json.JSONDecodeError) as e:
             print(f"WARNING: could not read reviewed candidates ({e}); using SEED only.")
-    registry = matcher.Registry(SEED_PAIRS + reviewed)
+    # v1 (frozen) by default. --aliases switches to the matcher_v2 recall
+    # extension so the two runs can be diffed, per the frozen-change protocol.
+    aliases = []
+    matcher_used = "v1 (surfacer/matcher.py, frozen)"
+    if args.aliases and os.path.exists(args.aliases):
+        try:
+            with open(args.aliases, "r", encoding="utf-8") as f:
+                aliases = [(str(e), str(v), str(a)) for e, v, a in json.load(f)]
+            import matcher_v2
+            registry = matcher_v2.AliasRegistry(SEED_PAIRS + reviewed, aliases)
+            matcher_used = f"v2 (surfacer/matcher_v2.py, {len(aliases)} aliases)"
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(f"WARNING: could not read aliases ({e}); falling back to v1.")
+            registry = matcher.Registry(SEED_PAIRS + reviewed)
+    else:
+        registry = matcher.Registry(SEED_PAIRS + reviewed)
 
-    # control = candidate pairs that are NOT in the registry (the comparator)
+    # control = candidate pairs that are NOT in the registry (the comparator),
+    # always v1 — the control measures baseline noise, not the alias lift.
     reg_pairs = set(registry.pairs())
     control_pairs = [(c["entity"], c["value"]) for c in candidates
                      if (matcher.normalize_extraction(c["entity"]), c["value"]) not in reg_pairs]
@@ -492,6 +511,7 @@ def main():
     archive_end = max((p["ts"] for p in posts if p["ts"]), default=None)
     seats, extra = compute_metrics(posts, registry, control_registry, archive_end,
                                    resolution_events)
+    extra["matcher_used"] = matcher_used
 
     out = write_reports(args.out_dir, candidates, seats, scan_meta, registry,
                         control_registry, extra)
