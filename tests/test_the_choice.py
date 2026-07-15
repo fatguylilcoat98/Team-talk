@@ -202,6 +202,36 @@ def run():
     assert len(CRT.list_items()) == 2 and "wrong read" in CRT.context_block()
     ok("20 CRT pin + marker extraction + context")
 
+    # 24. Forgiving markers: seats write them INLINE, not on a bare line.
+    # "CHOICE OPEN this turn" (Chris's transcript) must still register + strip.
+    make(seats=("p_a",))
+    cid24 = C.active_instance()["id"]
+    cln, a = C.extract("Alright, CHOICE OPEN this turn, index next round.".replace("Alright, ", ""))
+    assert a["open"] and "CHOICE OPEN" not in cln, "inline OPEN must register and strip"
+    _, a = C.extract("CHOICE READ: 2-4 to see those pages")
+    assert a["reads"] == ["2-4 "] or a["reads"][0].strip() == "2-4", "inline READ must register"
+    _, a = C.extract("CHOICE DISCLOSE: keep_private for now")
+    assert a["disclosure"] == "KEEP_PRIVATE", "lowercase/trailing DISCLOSE must normalize"
+    # but a mid-sentence mention must NOT trip it (no false positive)
+    _, a = C.extract("I might use CHOICE OPEN later but not yet.")
+    assert not a["open"], "mid-sentence marker mention must not trigger"
+    C.end_early()
+    ok("24 markers register the way seats actually write them (inline, forgiving)")
+
+    # 25. Sticky Lounge flag must NOT freeze the countdown. session['lounge'] is
+    # set once by the Lounge and never cleared; the countdown must key off the
+    # round that just completed, not that stale session flag.
+    make(seats=("p_a",), rounds=2)
+    stuck = {"lounge": True, "rounds": [{"round": 1, "lounge": False}]}
+    stuck["rounds"].append({"round": 2})            # a real Living Room round
+    C.on_round_completed(stuck)
+    assert C.active_instance()["rounds_remaining"] == 1, "sticky lounge flag froze the countdown"
+    # a genuinely Lounge last round still does not count
+    C.on_round_completed({"lounge": False, "rounds": [{"round": 3, "lounge": True}]})
+    assert C.active_instance()["rounds_remaining"] == 1, "a real Lounge round must not decrement"
+    C.end_early()
+    ok("25 countdown keys off the completed round, not a sticky session flag")
+
     # ledger: every Choice/CRT action is a real whitelisted action (no other:*)
     acts = set()
     with open(ledger.LEDGER_PATH) as f:

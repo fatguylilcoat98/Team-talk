@@ -65,11 +65,15 @@ MAX_ROUNDS = 50
 
 DISCLOSURES = ("SHARE", "SHARE_PARTIAL", "KEEP_PRIVATE", "PASS")
 
-_OPEN_LINE = re.compile(r"^[ \t]*CHOICE OPEN[ \t]*$", re.MULTILINE)
-_READ_LINE = re.compile(r"^[ \t]*CHOICE READ:[ \t]*([0-9,\- \t]+)$", re.MULTILINE)
-_SAVE_LINE = re.compile(r"^[ \t]*CHOICE SAVE:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
-_PASS_LINE = re.compile(r"^[ \t]*CHOICE PASS[ \t]*$", re.MULTILINE)
-_DISC_LINE = re.compile(r"^[ \t]*CHOICE DISCLOSE:[ \t]*([A-Z_]+)[ \t]*$", re.MULTILINE)
+# Forgiving on purpose: seats write these markers inline ("CHOICE OPEN this
+# turn"), not always on a bare line. Each must still START a line (so prose
+# mentioning the marker mid-sentence never trips it), but trailing words after
+# the marker/argument are tolerated and the whole line is consumed on strip.
+_OPEN_LINE = re.compile(r"^[ \t]*CHOICE OPEN\b.*$", re.MULTILINE | re.IGNORECASE)
+_READ_LINE = re.compile(r"^[ \t]*CHOICE READ:?[ \t]*([0-9][0-9,\- \t]*).*$", re.MULTILINE | re.IGNORECASE)
+_SAVE_LINE = re.compile(r"^[ \t]*CHOICE SAVE:[ \t]*(.+?)[ \t]*$", re.MULTILINE | re.IGNORECASE)
+_PASS_LINE = re.compile(r"^[ \t]*CHOICE PASS\b.*$", re.MULTILINE | re.IGNORECASE)
+_DISC_LINE = re.compile(r"^[ \t]*CHOICE DISCLOSE:?[ \t]*([A-Za-z_]+)\b.*$", re.MULTILINE | re.IGNORECASE)
 
 
 def _now() -> str:
@@ -211,8 +215,15 @@ def end_early(reason: str = "ended by Chris") -> Optional[dict]:
 
 def on_round_completed(session: dict) -> Optional[dict]:
     """Called after every persisted chat round. Lounge rounds don't count —
-    the countdown is labeled 'Living Room rounds' everywhere."""
-    if session.get("lounge"):
+    the countdown is labeled 'Living Room rounds' everywhere.
+
+    Decide lounge-ness from the round that JUST completed, not a session-level
+    flag: `session["lounge"]` is set once by the Lounge and never cleared, so a
+    session that ever hosted a Lounge round would otherwise freeze the countdown
+    forever (every later Living Room round wrongly skipped). The Lounge path
+    never calls this, so the last round here is the real Living Room round."""
+    rounds = session.get("rounds") or []
+    if rounds and rounds[-1].get("lounge"):
         return None
     inst = active_instance()
     if not inst:
@@ -283,8 +294,9 @@ def extract(text: str) -> Tuple[str, dict]:
         "passed": bool(_PASS_LINE.search(t)),
         "disclosure": "",
     }
-    disc = _DISC_LINE.findall(t)
-    if disc and disc[-1] in DISCLOSURES:
+    disc = [d.strip().upper() for d in _DISC_LINE.findall(t)]
+    disc = [d for d in disc if d in DISCLOSURES]
+    if disc:
         actions["disclosure"] = disc[-1]
     for rx in (_OPEN_LINE, _READ_LINE, _SAVE_LINE, _PASS_LINE, _DISC_LINE):
         t = rx.sub("", t)
