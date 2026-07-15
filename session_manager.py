@@ -14,6 +14,7 @@ from typing import List, Optional
 
 import aiofiles
 
+import ledger
 import pdf_export
 
 SESSIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
@@ -75,15 +76,41 @@ async def load_session(session_id: str) -> Optional[dict]:
     path = _path(session_id)
     if not os.path.exists(path):
         return None
-    # A corrupt/truncated file (crash mid-write, external edit) must degrade to
-    # "not found" — not 500 every endpoint that loads it. Matches list_sessions.
     try:
         async with aiofiles.open(path, "r", encoding="utf-8") as f:
             session = json.loads(await f.read())
-    except (OSError, json.JSONDecodeError, ValueError):
+    except OSError:
+        # Transient read error (not corruption) — degrade to "not found" without
+        # touching the file; a later load may succeed.
+        return None
+    except (json.JSONDecodeError, ValueError):
+        # The file exists but won't parse (crash mid-write on an old code path,
+        # disk fault, external edit). Returning None alone is a data-loss trap:
+        # the chat endpoint would treat this id as new, and the next save_session
+        # os.replace()s the corrupt-but-recoverable archive with an empty one —
+        # the whole conversation vanishes with no tombstone. So set the bad file
+        # ASIDE first (a name that won't be listed or reloaded), leave a ledger
+        # record, and only then degrade to "not found". The bytes survive for
+        # recovery; the next save writes a fresh file instead of clobbering.
+        _quarantine_corrupt(session_id, path)
         return None
     session["rounds"] = [normalize_round(r) for r in session.get("rounds", [])]
     return session
+
+
+def _quarantine_corrupt(session_id: str, path: str) -> None:
+    stamp = _now().replace(":", "").replace("-", "")
+    dest = os.path.join(SESSIONS_DIR, f"{session_id}.{stamp}.corrupt")
+    try:
+        os.rename(path, dest)
+    except OSError:
+        # Another loader already moved it, or it disappeared — nothing to record.
+        return
+    ledger.append(
+        "system", "session_quarantined", ref=session_id,
+        detail={"reason": "unparseable session file set aside before it could be "
+                          "overwritten by a fresh save", "moved_to": os.path.basename(dest)},
+    )
 
 
 async def save_session(session: dict) -> None:

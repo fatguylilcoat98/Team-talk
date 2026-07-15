@@ -68,6 +68,8 @@ ACTIONS = {
     "crt_pinned", "crt_evicted",
     # ✋ seat moves (the scratchpad is deliberately un-ledgered)
     "seat_passed",
+    # a corrupt/truncated session file, set aside instead of silently clobbered
+    "session_quarantined",
 }
 
 
