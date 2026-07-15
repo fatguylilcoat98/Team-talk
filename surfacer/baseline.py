@@ -20,7 +20,9 @@ What it does, per the audit build order:
         - hedge-resolution rate (0 on history: no SOURCE events exist yet)
         - open-claim age distribution
         - claim frequency per session
-      Claim identity is the tuple (seat_id, normalized_entity, value).
+      Per the room's frozen split: a CLAIM is (entity, value); a FLAG is
+      (seat_id, entity, value). Repeat-rate is a per-seat measure, so it keys
+      on the FLAG. (A future SOURCE would resolve a CLAIM room-wide.)
   (3) A machine-readable JSON report + a human-readable per-seat summary.
 
 Run:  python3 surfacer/baseline.py
@@ -234,7 +236,8 @@ def _repeat_stats(posts_by_seat, registry):
     """For each seat, walk its posts in chronological order and count claim
     occurrences, tier-2 repeats (any restatement of a claim already made) and
     tier-1 repeats (restatement whose SENTENCE exactly matches an earlier one).
-    Claim identity is (seat_id, normalized_entity, value)."""
+    Flag identity is (seat_id, normalized_entity, value); the claim itself is
+    (entity, value). Repeat-rate is per-seat, so it keys on the flag."""
     stats = {}
     for seat_id, seat_posts in posts_by_seat.items():
         occ = 0
@@ -363,7 +366,8 @@ def write_reports(out_dir, candidates, seats, scan_meta, registry, control_regis
     report = {
         "generated_at": generated,
         "matcher": "surfacer/matcher.py (frozen, 19 tests passing)",
-        "claim_identity": "(seat_id, normalized_entity, value)",
+        "claim_identity": "(entity, value)",
+        "flag_identity": "(seat_id, normalized_entity, value) — repeat-rate keys on this",
         "registry_seed": [{"entity": e, "value": v} for e, v in registry.pairs()],
         "control_registry_size": len(control_registry.pairs()),
         "scan": scan_meta,
@@ -388,7 +392,8 @@ def _summary_lines(report):
     L = ["# Surfacer baseline — per-seat summary", "",
          f"Generated: {report['generated_at']}",
          f"Matcher: {report['matcher']}",
-         f"Claim identity: {report['claim_identity']}", ""]
+         f"Claim identity: {report['claim_identity']} · "
+         f"Flag identity: {report.get('flag_identity', '')}", ""]
     s = report["scan"]
     L += ["## Scan",
           f"- sessions dir: `{s.get('sessions_dir')}`",
