@@ -103,17 +103,29 @@ lets a future format change be migrated by branching on the version
 instead of guessing a row's age. Observations are ephemeral and instead
 carry `registry_version` (the contract that produced them).
 
-## Future seam (not yet wired)
+## Live wiring (Workshop)
 
-Workshop participations should eventually be emitted from
-`workshop_engine.run_cycle`, at the `workshop_store.append_version(...)`
-site where a seat's bench edit becomes a durable version. The retry
-pairing signal there is non-semantic and already present: the version
-chain (`workshop_store.list_versions`, keyed by author `by` and `v`, with
-`verdict_for` rulings) identifies a seat resubmitting after its prior
-version was rejected — no content matching required. Per the existing
-"the caller (app.py) owns ledger events" division, the actual wiring
-belongs where app.py consumes the cycle report.
+`workshop_reasoning.py` connects the Workshop to the graph, and `app.py`
+calls it at the two sites where it already owns ledger events:
+
+- **Target set** (`set_workshop_target`): the target's goal opens one Claim
+  (`open_target_claim`), whose id is stored on the workshop state
+  (`reasoning_claim_id`) so the session's turns attach to it.
+- **Each cycle** (`_workshop_cycle_task`, inside the same lock that
+  serializes cycles): every content-bearing turn (landed / pending /
+  rejected) becomes an `assert` Participation (`record_cycle`). A seat's
+  successive turns on the Claim are linked `retry_of` its prior — a purely
+  structural same-seat, same-Claim relationship; no content is inspected,
+  and nothing here decides whether a turn "really" is a retry.
+
+**Developer view:** `GET /api/workshop/reasoning` returns the Claims,
+Participations, and the Layer-1 observations computed on demand
+(`workshop_reasoning.snapshot`). `?scope=all` shows the whole graph; the
+default scopes to the current target's Claim. Observations are derived at
+request time and never persisted.
+
+End-to-end coverage is in `tests/test_workshop_reasoning.py` (runs without
+FastAPI or any AI provider).
 
 ## Tests
 

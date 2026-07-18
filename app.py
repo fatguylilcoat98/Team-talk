@@ -59,6 +59,7 @@ import settings_store
 import splendor
 import wall_store
 import workshop_engine
+import workshop_reasoning
 import workshop_store
 from conversation import (MODES, SHORT_TERM_ROUNDS, blind_labels, build_context,
                           lounge_system_prompt,
@@ -885,6 +886,11 @@ async def _workshop_cycle_task() -> dict:
                               detail={"reason": "malformed bench reply"})
                 receipt_store.issue(t["seat"], "workshop_edit", "rejected",
                                     {"malformed": True, "locked_next_cycle": True})
+        # Reasoning ledger: every content-bearing turn becomes an assert
+        # Participation on this target's Claim (a seat's successive turns are
+        # marked retry_of its prior). Same lock, so appends stay sequential.
+        workshop_reasoning.record_cycle(
+            workshop_store.load_state().get("reasoning_claim_id"), report["turns"])
         return report
 
 
@@ -1672,6 +1678,20 @@ async def get_workshop():
     }
 
 
+@app.get("/api/workshop/reasoning")
+async def get_workshop_reasoning(scope: str = "claim"):
+    """Developer view of the reasoning graph this session produced.
+
+    Returns the Claims and Participations (Layer 0), plus the Layer-1
+    mechanical observations computed on demand — the observations are
+    derived here and never persisted. `scope=all` shows the whole graph;
+    the default (`scope=claim`) scopes Participations/observations to the
+    current target's Claim.
+    """
+    claim_id = workshop_store.load_state().get("reasoning_claim_id")
+    return workshop_reasoning.snapshot(None if scope == "all" else claim_id)
+
+
 @app.post("/api/workshop/target")
 async def set_workshop_target(body: WorkshopTarget):
     if body.check_mode == "script" and not (body.check_script or "").strip():
@@ -1687,6 +1707,12 @@ async def set_workshop_target(body: WorkshopTarget):
             raise HTTPException(status_code=400, detail="A goal is required (and the seed must fit)")
         ledger.append("Chris", "workshop_target_set", ref=target["filename"],
                       detail={"goal": target["goal"][:200], "check_mode": target["check_mode"]})
+        # Reasoning ledger: a target is a durable idea — open its Claim and
+        # remember it on the state so this session's bench turns attach to it.
+        claim_id = workshop_reasoning.open_target_claim(target["goal"])
+        st = workshop_store.load_state()
+        st["reasoning_claim_id"] = claim_id
+        workshop_store.save_state(st)
     return target
 
 
