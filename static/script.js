@@ -849,7 +849,7 @@ function buildRound(round, pending = false, reveal = false) {
     } else {
         const names = (round.responses || []).map((r) => (reveal ? r.name : (r.label || r.name)));
         for (const resp of round.responses || []) {
-            stack.appendChild(aiBubble(resp, names, reveal));
+            stack.appendChild(aiBubble(resp, names, reveal, round));
         }
     }
     roundEl.appendChild(stack);
@@ -900,7 +900,97 @@ async function saveToMemory(text, btn) {
     }
 }
 
-function aiBubble(resp, allNames = [], reveal = false) {
+const SEV_COLOR = { green: '#4bb388', yellow: '#d0a020', red: '#d9534f' };
+
+// 🪞 Reflection Layer card — shows Mirror/Assumption/Confidence status, an
+// Explain toggle with bounded excerpts, and a human-triggered Revise Once.
+function reflectionCard(resp, round) {
+    const r = resp.reflection || {};
+    const card = document.createElement('div');
+    card.className = 'reflection-card';
+    card.style.borderColor = SEV_COLOR[r.overall_severity] || SEV_COLOR.green;
+
+    const head = document.createElement('div');
+    head.className = 'reflection-head';
+    head.appendChild(document.createTextNode('🪞 Reflection Layer'));
+    const passes = r.passes || {};
+    for (const [name, label] of [['mirror', 'Mirror'], ['assumption', 'Assumption'], ['confidence', 'Confidence']]) {
+        const b = document.createElement('span');
+        b.className = 'reflection-badge';
+        b.style.background = SEV_COLOR[passes[name]] || SEV_COLOR.green;
+        b.textContent = `${label}: ${passes[name] || 'green'}`;
+        head.appendChild(b);
+    }
+    card.appendChild(head);
+
+    const warnings = r.warnings || [];
+    if (warnings.length) {
+        const explain = document.createElement('div');
+        explain.className = 'reflection-explain';
+        explain.hidden = true;
+        for (const w of warnings) {
+            const item = document.createElement('div');
+            item.className = 'reflection-warning';
+            item.style.borderColor = SEV_COLOR[w.severity] || SEV_COLOR.yellow;
+            let html = `<b>${escapeText(w.category)}</b> — ${escapeText(w.message)}`;
+            if (w.prior_excerpt) html += `<div class="reflection-excerpt">prior: “${escapeText(w.prior_excerpt)}”</div>`;
+            if (w.source_reference) html += `<div class="reflection-ref">ref: ${escapeText(String(w.source_reference))}</div>`;
+            item.innerHTML = html;
+            explain.appendChild(item);
+        }
+        const actions = document.createElement('div');
+        actions.className = 'reflection-actions';
+        const explainBtn = document.createElement('button');
+        explainBtn.type = 'button';
+        explainBtn.className = 'reflection-btn';
+        explainBtn.textContent = 'Explain';
+        explainBtn.addEventListener('click', () => { explain.hidden = !explain.hidden; });
+        actions.appendChild(explainBtn);
+
+        const canRevise = !resp.reflection_revision_performed && round && round.round && currentSessionId;
+        if (canRevise) {
+            const revBtn = document.createElement('button');
+            revBtn.type = 'button';
+            revBtn.className = 'reflection-btn revise-btn';
+            revBtn.textContent = 'Revise Once';
+            revBtn.addEventListener('click', () => reviseOnce(resp, round, revBtn));
+            actions.appendChild(revBtn);
+        } else if (resp.reflection_revision_performed) {
+            const done = document.createElement('span');
+            done.className = 'reflection-done';
+            done.textContent = '✎ revised once';
+            actions.appendChild(done);
+        }
+        card.appendChild(actions);
+        card.appendChild(explain);
+    }
+    return card;
+}
+
+async function reviseOnce(resp, round, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Revising…';
+    try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/revise`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ round: round.round, seat: resp.id || resp.name }),
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            btn.textContent = 'Revise failed';
+            btn.title = e.detail || '';
+            return;
+        }
+        // Reload the session so the revised text (clearly labeled) appears.
+        if (currentSessionId) await loadSession(currentSessionId);
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Revise Once';
+    }
+}
+
+function aiBubble(resp, allNames = [], reveal = false, round = null) {
     const el = document.createElement('div');
     const isError = (resp.text || '').startsWith('Error:');
     el.className = `bubble ai-bubble${isError ? ' error-bubble' : ''}`;
@@ -940,6 +1030,19 @@ function aiBubble(resp, allNames = [], reveal = false) {
         body.textContent = resp.text || '';
     }
     el.appendChild(body);
+
+    // 🪞 Reflection Layer card (visible mode) — additive, never replaces the text.
+    if (resp.reflection) el.appendChild(reflectionCard(resp, round));
+    // If this response was revised once, show the revised version clearly labeled.
+    if (resp.revised && resp.revised.text) {
+        const rev = document.createElement('div');
+        rev.className = 'bubble-text revised-text';
+        rev.innerHTML = `<span class="revised-tag">✎ revised once</span>`;
+        const rt = document.createElement('div');
+        rt.textContent = resp.revised.text;
+        rev.appendChild(rt);
+        el.appendChild(rev);
+    }
 
     // 💾 Pull this line into long-term memory — the manual save (the only way
     // anything from the off-the-record Lounge gets kept).
@@ -3401,6 +3504,30 @@ async function init() {
     }
     await refreshSessions();
     chrisInput.focus();
+    loadReflectionBanner();
+}
+
+// 🪞 Show the release announcement + that the Reflection Layer is active.
+async function loadReflectionBanner() {
+    try {
+        const st = await fetch('/api/reflection/status').then((r) => r.json()).catch(() => null);
+        if (!st || !st.enabled) return;
+        const mode = st.visible ? 'visible' : (st.shadow_mode ? 'shadow' : 'active');
+        const banner = document.getElementById('release-banner');
+        if (!banner) return;
+        banner.innerHTML =
+            `<button title="dismiss" onclick="this.parentElement.hidden=true">×</button>` +
+            `<span class="rb-title">🪞 Reflection Layer v1 is active (${mode} mode).</span> ` +
+            `Mirror · Assumption · Confidence run before each response is finalized. ` +
+            `<a href="#" id="rb-more">What's this?</a>`;
+        banner.hidden = false;
+        const more = document.getElementById('rb-more');
+        if (more) more.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const rn = await fetch('/api/release-notes').then((r) => r.json()).catch(() => ({}));
+            if (rn.markdown) alert(rn.markdown);
+        });
+    } catch (e) { /* banner is best-effort */ }
 }
 
 init();
