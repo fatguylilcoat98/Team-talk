@@ -113,10 +113,21 @@ calls it at the two sites where it already owns ledger events:
   (`reasoning_claim_id`) so the session's turns attach to it.
 - **Each cycle** (`_workshop_cycle_task`, inside the same lock that
   serializes cycles): every content-bearing turn (landed / pending /
-  rejected) becomes an `assert` Participation (`record_cycle`). A seat's
-  successive turns on the Claim are linked `retry_of` its prior — a purely
-  structural same-seat, same-Claim relationship; no content is inspected,
-  and nothing here decides whether a turn "really" is a retry.
+  rejected) becomes an `assert` Participation (`record_cycle`), with the
+  turn's disposition kept as a fact in the participation's `meta` (not
+  baked into content).
+
+**Retries are not inferred.** Same seat + same Claim proves only "later,"
+not "retry" — a later turn may be a refinement, a rebuttal, new evidence,
+or a fresh contribution. The Workshop has no genuine non-semantic retry
+signal today (a bench turn is only a PASS or an EDIT; the version chain's
+`prev_hash` is chronological, not an attempt pointer), so **normal turns
+are left unlinked and live retry emission is not yet wired**. The seam is
+ready: when a real signal exists (an explicit retry flag, a resend id, or a
+caller-supplied original participation id), pass it through
+`record_turn(..., is_retry=True, original_participation_id=...)` and only
+then is a `retry_of` edge created — via `append_from_retry_signal`, never
+guessed from content or order.
 
 **Developer view:** `GET /api/workshop/reasoning` returns the Claims,
 Participations, and the Layer-1 observations computed on demand

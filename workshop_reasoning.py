@@ -2,22 +2,32 @@
 
 Pure wiring. This module adds NO new reasoning behavior — it only
 translates Workshop events into existing reasoning_store / reasoning_
-observations calls, using the version chain's own non-semantic signals.
+observations calls.
 
 The mapping:
   * a Workshop target (the shared artifact/goal) is one Claim;
   * each seat's content-bearing bench turn (landed / pending / rejected)
-    is one `assert` Participation on that Claim;
-  * a seat's successive turns on the same Claim are modeled as retries —
-    each new turn carries a `retry_of` edge to that seat's most recent
-    prior participation on the Claim. This is a STRUCTURAL relationship
-    (same seat, same Claim, later in time); no content is inspected and
-    nothing here decides whether a turn "really" is a retry. That
-    interpretation is Layer 2, out of scope.
+    is one `assert` Participation on that Claim, with the turn's
+    disposition preserved as a fact in `meta`;
+  * multiple seats participate in the same Claim.
 
-Nothing is validated at emission time. Whether the resulting graph is
-well-formed is a Layer-1 question answered by observations(), never a
-write-time gate.
+RETRIES ARE NOT INFERRED FROM ORDERING.
+An earlier version of this module linked a seat's successive turns with a
+`retry_of` edge. That was wrong: same seat + same Claim proves only that a
+turn came later — it may be a refinement, a rebuttal, new evidence, a
+correction, or a genuinely new contribution. Auto-linking manufactures
+false edges and destroys the meaning of retry_of.
+
+The Workshop execution path carries no genuine, non-semantic retry signal
+today: a bench turn is only a PASS or an EDIT (a fence + note), and the
+version chain's prev_hash links chronologically, not to a specific prior
+attempt. So live retry emission is NOT wired — normal turns are left
+unlinked. The seam below is ready for the day a real signal exists (an
+explicit retry flag, a resend/delivery id, or a caller-supplied original
+participation id): pass it through `record_turn`, and only then is a
+`retry_of` edge created — via the store's `append_from_retry_signal`, the
+one source of truth. Nothing here ever guesses an original from content or
+turn order.
 """
 
 import reasoning_observations
@@ -43,48 +53,47 @@ def open_target_claim(goal: str) -> str:
     return claim["claim_id"]
 
 
-def _last_participation_id(claim_id: str, seat: str):
-    """The seat's most recent prior participation on this Claim, or None.
-
-    Structural only: filters by claim_id and seat, in append order. No
-    content is examined.
-    """
-    prior = [p for p in reasoning_store.list_participations()
-             if not p.get("_corrupt")
-             and p.get("claim_id") == claim_id
-             and p.get("seat") == seat]
-    return prior[-1]["participation_id"] if prior else None
-
-
-def record_turn(claim_id: str, seat: str, action: str, note: str) -> dict:
+def record_turn(claim_id: str, seat: str, action: str, note: str,
+                is_retry: bool = False,
+                original_participation_id=None) -> dict:
     """Emit one Participation for a seat's content-bearing bench turn.
 
-    A seat's first turn on a Claim is a plain assert; a later turn is a
-    retry of that seat's most recent prior participation (mapped to a
-    retry_of edge via the store's is_retry seam). Returns the Participation.
+    By default a turn is a plain `assert` Participation with NO retry_of
+    edge — successive turns by a seat are just separate Participations on
+    the same Claim. The turn's disposition (landed / pending / rejected) is
+    recorded as a fact in `meta`, not baked into the content.
+
+    THE RETRY SEAM (not exercised by live cycles yet): a caller that has a
+    genuine, non-semantic retry signal passes `is_retry=True`. Only then is
+    a retry_of edge created, and only through the store's
+    `append_from_retry_signal`:
+      * with a resolvable `original_participation_id` -> one valid retry_of;
+      * without one -> the event is preserved and Layer 1 reports the
+        original could not be resolved. The original is never guessed.
     """
-    content = f"[{action}] {note}".strip()
-    original = _last_participation_id(claim_id, seat)
-    if original:
+    meta = {"workshop_disposition": action}
+    content = note or ""
+    if is_retry:
         return reasoning_store.append_from_retry_signal(
             claim_id, seat, content, is_retry=True,
-            original_participation_id=original)
-    return reasoning_store.append_participation(claim_id, seat, content)
+            original_participation_id=original_participation_id, meta=meta)
+    return reasoning_store.append_participation(claim_id, seat, content, meta=meta)
 
 
 def record_cycle(claim_id: str, turns: list) -> list:
     """Emit Participations for every content-bearing turn in a cycle report.
 
-    Skips turns with no claim_id (a cycle that ran before a Claim was
-    opened) by requiring the caller to pass one. Returns the list of
-    Participations created, in turn order.
+    Live cycles carry no retry signal, so every turn here is recorded as a
+    plain Participation with no retry_of edge. Returns the Participations
+    created, in turn order.
     """
     out = []
     if not claim_id:
         return out
     for t in turns:
         if t.get("action") in RECORDED_ACTIONS:
-            out.append(record_turn(claim_id, t.get("seat") or t.get("name") or "unknown",
+            out.append(record_turn(claim_id,
+                                   t.get("seat") or t.get("name") or "unknown",
                                    t["action"], t.get("note", "")))
     return out
 

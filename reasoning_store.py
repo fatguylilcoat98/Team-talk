@@ -137,7 +137,8 @@ def append_participation(claim_id: str, seat: str, content: str,
                          ptype: str = "assert",
                          references: Optional[List[dict]] = None,
                          declared_resend_of: Optional[str] = None,
-                         participation_id: Optional[str] = None) -> dict:
+                         participation_id: Optional[str] = None,
+                         meta: Optional[dict] = None) -> dict:
     """Append an immutable Participation to an existing Claim.
 
     references: typed edges, stored VERBATIM and never validated here.
@@ -150,6 +151,9 @@ def append_participation(claim_id: str, seat: str, content: str,
     participation_id: normally minted here. May be supplied when the id was
         assigned upstream (cross-node graphs, out-of-order / delayed
         arrival), so a reference can name a target that arrives later.
+    meta: an optional, opaque map of caller-domain FACTS about the event
+        (e.g. a Workshop turn's disposition). Stored verbatim when present,
+        absent otherwise; the reasoning layer never interprets it.
     """
     references = [dict(r) for r in (references or [])]
     pid = participation_id or _new_id("participation")
@@ -165,17 +169,21 @@ def append_participation(claim_id: str, seat: str, content: str,
     }
     if declared_resend_of is not None:
         participation["declared_resend_of"] = declared_resend_of
+    if meta:
+        participation["meta"] = dict(meta)
     _append_jsonl(PARTICIPATIONS_PATH, participation)
     ledger.append(seat, "participation_appended", ref=pid,
                   detail={"claim_id": claim_id, "type": ptype,
                           "references": references,
-                          "declared_resend_of": declared_resend_of})
+                          "declared_resend_of": declared_resend_of,
+                          "meta": meta})
     return participation
 
 
 def append_from_retry_signal(claim_id: str, seat: str, content: str,
                              is_retry: bool = False,
-                             original_participation_id: Optional[str] = None) -> dict:
+                             original_participation_id: Optional[str] = None,
+                             meta: Optional[dict] = None) -> dict:
     """Map a structural `is_retry` signal into the graph's one source of truth.
 
     This is the CORRECT path. When a caller (e.g. the Workshop) declares a
@@ -195,7 +203,7 @@ def append_from_retry_signal(claim_id: str, seat: str, content: str,
         else:
             declared_resend_of = UNRESOLVED_TARGET
     return append_participation(claim_id, seat, content, references=references,
-                                declared_resend_of=declared_resend_of)
+                                declared_resend_of=declared_resend_of, meta=meta)
 
 
 # --- read-only accessors (no mutation exists in this module, by design) ---

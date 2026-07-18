@@ -887,8 +887,10 @@ async def _workshop_cycle_task() -> dict:
                 receipt_store.issue(t["seat"], "workshop_edit", "rejected",
                                     {"malformed": True, "locked_next_cycle": True})
         # Reasoning ledger: every content-bearing turn becomes an assert
-        # Participation on this target's Claim (a seat's successive turns are
-        # marked retry_of its prior). Same lock, so appends stay sequential.
+        # Participation on this target's Claim, disposition kept as a fact.
+        # No retry_of is inferred — the Workshop has no non-semantic retry
+        # signal yet (see workshop_reasoning). Same lock, so appends stay
+        # sequential.
         workshop_reasoning.record_cycle(
             workshop_store.load_state().get("reasoning_claim_id"), report["turns"])
         return report
