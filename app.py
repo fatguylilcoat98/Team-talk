@@ -58,6 +58,7 @@ import seat_moves
 import session_manager
 import settings_store
 import splendor
+import reflection
 import wall_store
 import workshop_engine
 import workshop_reasoning
@@ -875,6 +876,15 @@ async def _chat_impl(request: ChatRequest):
         **({"ghost_fork": True} if ghost_fork else {}),
         "responses": responses,
     }
+
+    # 🪞 Reflection Layer (Increment 2) — flag-gated SHADOW hook. Off by
+    # default: a single env check and return, response byte-identical. When on,
+    # it evaluates the finalized responses against each author's own prior
+    # session messages and appends to the SEPARATE reflection store — it never
+    # mutates responses, prompts, sessions, or the reasoning ledger, and never
+    # raises. It runs on the finalized round_data, before persistence.
+    reflection.hook.reflect_round(session, round_data, participants,
+                                  settings_store.load())
 
     # Persist immediately so no round is ever lost
     session["rounds"].append(round_data)
@@ -2291,6 +2301,105 @@ async def get_session(session_id: str):
         "created_at": session.get("created_at", ""),
         "rounds": session.get("rounds", []),
     }
+
+
+# --- 🪞 Reflection Layer (visible v1) -----------------------------------------
+
+class ReviseOnce(BaseModel):
+    round: int
+    seat: str          # participant id or display name of the response to revise
+
+
+@app.get("/api/reflection/status")
+async def reflection_status():
+    """Effective reflection mode + read-only analytics, so the room can SEE the
+    layer is active and how often it fires."""
+    s = settings_store.load()
+    return {
+        "enabled": reflection.flags.enabled(s),
+        "shadow_mode": reflection.flags.shadow_mode(s),
+        "visible": reflection.flags.visible(s),
+        "analytics": reflection.store.analytics(),
+    }
+
+
+@app.get("/api/reflection/reflections")
+async def reflection_records(author: str = None, limit: int = 100):
+    """Stored reflection records (for Explain / inspection). Read-only."""
+    return {"reflections": reflection.store.list_reflections(author=author, limit=limit)}
+
+
+@app.post("/api/sessions/{session_id}/revise")
+async def revise_once(session_id: str, body: ReviseOnce):
+    """Human-triggered Revise Once. Re-asks the flagged participant to revise
+    its own message addressing the reflection warnings, then stores BOTH the
+    original and the revised text with audit metadata. One revision only — no
+    recursion. Never silently replaces the answer: the original is preserved
+    and the revision is clearly labeled."""
+    session = await session_manager.load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    rd = next((r for r in session.get("rounds", []) if r.get("round") == body.round), None)
+    if not rd:
+        raise HTTPException(status_code=404, detail="Round not found")
+    resp = next((x for x in rd.get("responses", [])
+                 if x.get("id") == body.seat or x.get("name") == body.seat), None)
+    if not resp:
+        raise HTTPException(status_code=404, detail="Response not found")
+    if resp.get("reflection_revision_performed"):
+        raise HTTPException(status_code=409, detail="Already revised once — no further revision.")
+    card = resp.get("reflection") or {}
+    warnings = card.get("warnings", [])
+    if not warnings:
+        raise HTTPException(status_code=400, detail="No reflection warnings to address.")
+
+    participant = next((p for p in settings_store.get_participants()
+                        if p.get("id") == resp.get("id") or p.get("name") == resp.get("name")), None)
+    if not participant:
+        raise HTTPException(status_code=400, detail="That seat is no longer configured.")
+
+    concerns = "\n".join(f"- [{w.get('severity')}] {w.get('message')}" for w in warnings)
+    system = (f"You are {resp.get('name')}. Your own previous message was flagged by the "
+              f"Reflection Layer. Revise it ONCE to address these concerns honestly. Do not "
+              f"invent evidence; if you cannot support a claim, soften or withdraw it. Return "
+              f"only the revised message.")
+    prompt = (f"Your original message:\n\n{resp.get('text','')}\n\n"
+              f"Reflection concerns:\n{concerns}\n\nRevise once, addressing them.")
+    result = await api_client.call_participant(participant, system, prompt, context="chat",
+                                               session_id=session_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=502, detail=f"Revision call failed: {result.get('text','')[:200]}")
+
+    revised_text = _clean_markers(result["text"], settings_store.get_participants())
+    resp["original_text"] = resp.get("text", "")            # preserve the original, labeled
+    resp["revised"] = {"text": revised_text,
+                       "revised_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                       "reason": "reflection"}
+    resp["reflection_revision_performed"] = True            # guards against a second revision
+    await session_manager.save_session(session)
+    # audit: mark the stored reflection record as revised (append-only new line)
+    try:
+        rid = card.get("reflection_id")
+        recs = reflection.store.list_reflections()
+        match = next((r for r in reversed(recs) if r.get("reflection_id") == rid), None)
+        if match:
+            match["revision_performed"] = True
+            reflection.store.record(match, revision_performed=True)
+    except Exception:
+        pass
+    return {"ok": True, "original": resp["original_text"], "revised": revised_text,
+            "revised_at": resp["revised"]["revised_at"]}
+
+
+@app.get("/api/release-notes")
+async def release_notes():
+    """The room-facing release announcement (served for the UI banner)."""
+    try:
+        with open(os.path.join(os.path.dirname(STATIC_DIR), "docs", "ROOM_RELEASE_NOTES.md"),
+                  encoding="utf-8") as f:
+            return {"markdown": f.read()}
+    except OSError:
+        return {"markdown": ""}
 
 
 @app.post("/api/sessions/{session_id}/export")
