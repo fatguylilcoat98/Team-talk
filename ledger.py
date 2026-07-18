@@ -72,6 +72,8 @@ ACTIONS = {
     "session_quarantined",
     # 🔎 the surfacer resolution layer — durable, attributed, hash-chained
     "surfacer_source", "surfacer_challenge",
+    # 🧩 the reasoning graph — Layer 0 Claims and Participations (append-only)
+    "claim_created", "participation_appended",
 }
 
 
