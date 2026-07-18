@@ -155,7 +155,13 @@ def _render_session(pdf: _SessionPDF, session: dict, normalize_round,
         pdf.multi_cell(0, 4.5, pdf.clean(marker), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(1)
 
-        chris_name = "SPLENDOR (FOR CHRIS)" if r.get("via_splendor") else "CHRIS"
+        _an = r.get("author_name")
+        if _an and _an != "Chris":
+            chris_name = f"{_an.upper()} (RELAYED BY {(r.get('relay_name') or 'Chris').upper()})"
+        elif r.get("via_splendor"):
+            chris_name = "SPLENDOR (FOR CHRIS)"
+        else:
+            chris_name = "CHRIS"
         _speaker_block(pdf, chris_name, CHRIS_GOLD, r.get("chris_message", ""))
         att_names = ", ".join(a.get("name", "") for a in r.get("attachments", []))
         if att_names:

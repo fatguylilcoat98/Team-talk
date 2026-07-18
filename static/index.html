@@ -328,6 +328,20 @@
             <button id="attach-btn" class="attach-btn" title="Attach pictures or files">&#128206;</button>
             <input type="file" id="attach-input" multiple hidden
                    accept="image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.html,.css,.log,.xml,.yaml,.yml,.sh,.ini,.conf,.toml">
+            <select id="speaker-select" class="speaker-select"
+                    title="Provenance: who authored this message. 'Chris' = you. Anything else is relayed by you.">
+                <option value="Chris">✓ Chris</option>
+                <option value="Outside ChatGPT">Outside ChatGPT</option>
+                <option value="Outside Claude">Outside Claude</option>
+                <option value="Outside Gemini">Outside Gemini</option>
+                <option value="Outside Grok">Outside Grok</option>
+                <option value="Outside Copilot">Outside Copilot</option>
+                <option value="Outside Perplexity">Outside Perplexity</option>
+                <option value="Outside Muse">Outside Muse</option>
+                <option value="Outside FLINT">Outside FLINT</option>
+                <option value="Guest">Guest</option>
+                <option value="__custom__">Custom…</option>
+            </select>
             <textarea
                 id="chris-input"
                 placeholder="Your message to the AIs..."

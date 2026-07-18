@@ -14,6 +14,36 @@ const turnSelect = document.getElementById('turn-select');
 let currentSessionId = null;
 let participantsCache = [];  // [{id, name, color, ...}] from /api/settings
 
+// 🪪 Speaker provenance — who AUTHORED this message. "Chris" = Chris himself;
+// anything else is authored by that voice and relayed by Chris. Remembered
+// per browser so the last choice sticks across the session.
+const speakerSelect = document.getElementById('speaker-select');
+let customSpeakerName = '';
+function currentSpeaker() {
+    const v = speakerSelect ? speakerSelect.value : 'Chris';
+    return v === '__custom__' ? (customSpeakerName || 'Guest') : v;
+}
+function markCustomOption() {
+    const opt = speakerSelect && [...speakerSelect.options].find((o) => o.value === '__custom__');
+    if (opt) opt.textContent = customSpeakerName ? `Custom: ${customSpeakerName}` : 'Custom…';
+}
+if (speakerSelect) {
+    const saved = localStorage.getItem('tt_speaker');
+    if (saved) {
+        if ([...speakerSelect.options].some((o) => o.value === saved)) speakerSelect.value = saved;
+        else { customSpeakerName = saved; speakerSelect.value = '__custom__'; markCustomOption(); }
+    }
+    speakerSelect.addEventListener('change', () => {
+        if (speakerSelect.value === '__custom__') {
+            const name = (prompt('Author name (who wrote this message):', customSpeakerName || '') || '').trim();
+            if (name) { customSpeakerName = name; markCustomOption(); localStorage.setItem('tt_speaker', name); }
+            else { speakerSelect.value = 'Chris'; localStorage.setItem('tt_speaker', 'Chris'); }
+        } else {
+            localStorage.setItem('tt_speaker', speakerSelect.value);
+        }
+    });
+}
+
 // --- Session management -------------------------------------------------
 
 async function refreshSessions() {
@@ -693,6 +723,8 @@ async function sendMessage() {
                 turn_style: turnSelect.value,
                 awards: awardsToggle.checked,
                 via_splendor: splendorToggle.checked,
+                author_name: currentSpeaker(),
+                relay_name: 'Chris',
                 room_context: deviceContext(),
                 attachments: sentAttachments.map((a) => a.id),
                 lounge: loungeMode,
@@ -799,8 +831,24 @@ function buildRound(round, pending = false, reveal = false) {
     chrisRow.className = 'chris-row';
     const chrisBubble = document.createElement('div');
     chrisBubble.className = 'bubble chris-bubble';
-    chrisBubble.appendChild(speakerEl('#e8b04b',
-        round.via_splendor ? '🕊️ Splendor (for Chris)' : 'Chris (you)'));
+    // Provenance: a relayed message shows the AUTHOR, with "Relayed by <relay>"
+    // underneath — so the room knows who authored vs who relayed.
+    const authorName = round.author_name;
+    const relayName = round.relay_name || 'Chris';
+    let relaySub = null, speakerLabel;
+    if (authorName && authorName !== 'Chris') {
+        speakerLabel = authorName;
+        relaySub = `Relayed by ${relayName}`;
+    } else {
+        speakerLabel = round.via_splendor ? '🕊️ Splendor (for Chris)' : 'Chris (you)';
+    }
+    chrisBubble.appendChild(speakerEl('#e8b04b', speakerLabel));
+    if (relaySub) {
+        const sub = document.createElement('div');
+        sub.className = 'relay-sub';
+        sub.textContent = relaySub;
+        chrisBubble.appendChild(sub);
+    }
     const chrisText = document.createElement('div');
     chrisText.className = 'bubble-text';
     chrisText.textContent = round.chris_message;

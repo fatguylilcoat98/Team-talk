@@ -493,6 +493,16 @@ THE ONLY THINGS TRUE IN HERE:
 When Chris takes the room back to the Living Room, the work is back on. Not here. Here it's just the room, the people in it, and whatever comes up."""
 
 
+def _speaker_label(author_name, relay_name="Chris", via_splendor=False) -> str:
+    """How the message's speaker is named to the AIs. Provenance, not roleplay:
+    a message relayed FROM another author is shown as that author, relayed by
+    Chris — so the room knows who authored vs who relayed. Falls back to the
+    existing Splendor/Chris behavior when there is no separate author."""
+    if author_name and author_name != "Chris":
+        return f"{author_name} (relayed by {relay_name or 'Chris'})"
+    return "Splendor (for Chris)" if via_splendor else "Chris"
+
+
 def build_context(
     rounds: List[dict],
     current_message: str,
@@ -506,6 +516,8 @@ def build_context(
     via_splendor: bool = False,
     room_context: Optional[dict] = None,
     lounge: bool = False,
+    author_name: Optional[str] = None,
+    relay_name: str = "Chris",
 ) -> str:
     """Build the user-message prompt for one AI.
 
@@ -567,7 +579,8 @@ def build_context(
         prev_dt = dt or prev_dt
         lines.append("")
         lines.append(f"[Round {r['round']}]" + (f" — {when}" if when else ""))
-        chris_speaker = "Splendor (for Chris)" if r.get("via_splendor") else "Chris"
+        chris_speaker = _speaker_label(r.get("author_name"), r.get("relay_name", "Chris"),
+                                       r.get("via_splendor"))
         chris_line = f"{chris_speaker}: {r['chris_message']}"
         att_names = [a.get("name", "?") for a in r.get("attachments", [])]
         if att_names:
@@ -588,7 +601,7 @@ def build_context(
         since = (now - prev_dt).total_seconds()
         current_header += f" ({_dur(since)} since the last message)"
     lines.append(current_header + " ===")
-    current_speaker = "Splendor (for Chris)" if via_splendor else "Chris"
+    current_speaker = _speaker_label(author_name, relay_name, via_splendor)
     lines.append(f"{current_speaker}: {current_message}")
     if attachments_block:
         lines.append("")
