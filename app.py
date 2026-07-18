@@ -164,6 +164,8 @@ class ChatRequest(BaseModel):
     attachments: Optional[List[str]] = None  # upload ids from /api/upload
     awards: Optional[bool] = True            # live commentary & awards layer
     via_splendor: Optional[bool] = False     # Splendor delivers Chris's message
+    author_name: Optional[str] = None        # provenance: who AUTHORED this message
+    relay_name: Optional[str] = None          # provenance: who RELAYED it (default Chris)
     room_context: Optional[RoomContext] = None  # device-verified time & place
     lounge: Optional[bool] = False           # 🛋️ off-the-record hangout room
 
@@ -459,6 +461,12 @@ async def _chat_impl(request: ChatRequest):
             message = delivered
             via_splendor = True
 
+    # Provenance: who AUTHORED this message vs who RELAYED it. Default is Chris
+    # authoring directly; when Chris relays another voice, both are recorded and
+    # the room sees "<author> (relayed by <relay>)" — not Chris as the author.
+    author_name = (request.author_name or "Chris").strip() or "Chris"
+    relay_name = (request.relay_name or "Chris").strip() or "Chris"
+
     for block in (episode_store.episodes_block(cross_episodes),
                   notebook_store.context_block(),
                   wall_store.context_block(),
@@ -530,7 +538,7 @@ async def _chat_impl(request: ChatRequest):
             build_context(history, message, me, others, modes, so_far,
                           memory_block=mem, attachments_block=attachments_block,
                           episodes_block=episodes_block, via_splendor=via_splendor,
-                          room_context=rc),
+                          room_context=rc, author_name=author_name, relay_name=relay_name),
         )
 
     def _strip_markers(text: str) -> str:
@@ -863,6 +871,9 @@ async def _chat_impl(request: ChatRequest):
         "mode": modes[0],   # older readers see the primary mode
         "modes": modes,
         "turn_style": turn_style,
+        # Provenance: always recorded as two separate fields (never overloaded).
+        "author_name": author_name,
+        "relay_name": relay_name,
         **({"via_splendor": True, "chris_raw": chris_raw} if via_splendor else {}),
         **({"room_context": rc} if rc else {}),
         "awards": awards,
