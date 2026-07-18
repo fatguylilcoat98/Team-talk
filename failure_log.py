@@ -20,7 +20,14 @@ implemented here are theirs, to the letter:
   retention policy can't back).
 """
 
-import fcntl
+try:
+    import fcntl  # POSIX advisory file locking
+except ImportError:
+    # Windows has no fcntl. Degrade locking to a no-op: this is safe ONLY for
+    # single-process local use (e.g. running the dev server on Windows) and
+    # provides NO cross-process locking. The production host is Linux, where
+    # fcntl is present and the real flock calls below run unchanged.
+    fcntl = None
 import json
 import os
 from datetime import datetime, timezone
@@ -55,11 +62,13 @@ def log_attempt(entry: dict) -> None:
         os.makedirs(LOG_DIR, mode=0o700, exist_ok=True)
         fd = os.open(LOG_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_EX)
             os.write(fd, line)          # single syscall — no interleaving
             size = os.fstat(fd).st_size
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
         if size > MAX_BYTES:
             _rotate()
