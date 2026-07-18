@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -225,6 +226,57 @@ async def chat(request: ChatRequest):
     return await _chat_impl(request)
 
 
+# --- Orchestration scaffolding scrub -------------------------------------
+# Team Talk appends a generated per-seat directive to every prompt
+# (conversation.build_context): "Now write your next chat message as <seat>.
+# Start by engaging with what <others> said — …". A model can echo that line
+# verbatim; if the echo were stored it would re-enter every later round as
+# transcript history and contaminate the room. These matchers remove ONLY the
+# complete generated template — seat-name slots vary, the surrounding wording
+# is the fixed fingerprint — including quoted / lightly-prefixed copies. They
+# never touch ordinary discussion that merely mentions writing or engaging, or
+# a paraphrase that isn't the generated sentence.
+_ORCH_Q = r'["“”‘’>\-\s]*'          # optional leading quote / prefix / space
+_ORCH_QE = r'["“”‘’]?'              # optional trailing quote
+_ORCH_DASH = r'\s*[—–-]\s*'
+_ORCH_SCAFFOLDING = [
+    # combined "engage" variant (the default)
+    re.compile(_ORCH_Q + r'now write your next chat message as [^.\n]{1,40}\.\s*'
+               r'start by engaging with what .{1,120}? said' + _ORCH_DASH +
+               r'quote or name one specific point and agree or push back on it' + _ORCH_DASH +
+               r'then respond to chris\.\s*do not summarize;?\s*converse\.' + _ORCH_QE, re.IGNORECASE),
+    # ai_only variant
+    re.compile(_ORCH_Q + r'now write your next chat message as [^.\n]{1,40}, addressed to .{1,120}? '
+               r'\(chris is watching\)\.\s*engage with their latest points directly and end with a '
+               r'question or challenge for them\.' + _ORCH_QE, re.IGNORECASE),
+    # "others haven't spoken yet" variant
+    re.compile(_ORCH_Q + r'now write your next chat message as [^.\n]{1,40}\.\s*the other ai\(s\) '
+               r'haven.?t spoken yet, so just respond to chris directly and conversationally\.' + _ORCH_QE,
+               re.IGNORECASE),
+    # standalone "engage" tail (when only that sentence survives)
+    re.compile(_ORCH_Q + r'start by engaging with what .{1,120}? said' + _ORCH_DASH +
+               r'quote or name one specific point and agree or push back on it' + _ORCH_DASH +
+               r'then respond to chris\.\s*do not summarize;?\s*converse\.' + _ORCH_QE, re.IGNORECASE),
+    # standalone opener (the full generated opener sentence)
+    re.compile(_ORCH_Q + r'now write your next chat message as [^.\n]{1,40}\.' + _ORCH_QE, re.IGNORECASE),
+]
+
+
+def _strip_orchestration_scaffolding(text: str) -> str:
+    """Remove a model's verbatim echo of Team Talk's generated per-seat
+    orchestration directive, so it is never saved to the session, returned to
+    the interface, or fed into a later round's context. Matches only the
+    complete generated template (and quoted/lightly-prefixed copies); ordinary
+    discussion and paraphrases are left untouched."""
+    if not text:
+        return text
+    for pat in _ORCH_SCAFFOLDING:
+        text = pat.sub(" ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _clean_markers(text: str, participants: list) -> str:
     """Strip every marker line WITHOUT storing anything. Module-level twin of
     the nested _strip_markers, so the Lounge can present a clean read too —
@@ -245,6 +297,7 @@ def _clean_markers(text: str, participants: list) -> str:
     text, _, _ = seat_moves.extract(text)
     text, _ = mode_shift.extract(text)
     text = room_actions._ACTION_LINE.sub("", text).strip()
+    text = _strip_orchestration_scaffolding(text)
     return text
 
 
@@ -498,6 +551,7 @@ async def _chat_impl(request: ChatRequest):
         text, _, _ = seat_moves.extract(text)
         text, _ = mode_shift.extract(text)
         text = room_actions._ACTION_LINE.sub("", text).strip()
+        text = _strip_orchestration_scaffolding(text)
         return text
 
     responses = []
@@ -914,7 +968,7 @@ def _response_entry(p: dict, result: dict, label: Optional[str] = None) -> dict:
     entry = {
         "id": p["id"],
         "name": p["name"],
-        "text": result["text"],
+        "text": _strip_orchestration_scaffolding(result["text"]),
         "tokens": result["tokens"],
         # The structured truth of whether the call succeeded — so downstream
         # never has to guess from an "Error:" text prefix (a real reply that
