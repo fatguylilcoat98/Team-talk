@@ -14,6 +14,7 @@ from typing import List, Optional
 
 import aiofiles
 
+import blind_experiment
 import ledger
 import pdf_export
 
@@ -177,8 +178,45 @@ def _mode_marker(r: dict) -> str:
     return " + ".join(t for t in titles if t)
 
 
+def _resolve_blind_labels(session: dict) -> dict:
+    """Reveal-aware export gating, in ONE place all export paths share.
+
+    A blind response's stored `label` is frozen at "Voice N" forever — the
+    real name is never overwritten (session_manager never mutates the stored
+    file for this). What CAN change is whether an export is allowed to show
+    both: before blind_experiment.reveal() the label stays sealed; after it,
+    every export shows "Voice N — Name", same as the live room's own
+    display_map(). If the experiment record is missing or unreadable, this
+    fails closed — the round simply stays anonymous, never guesses revealed.
+
+    Returns a shallow copy; the stored session dict is never touched."""
+    out = dict(session)
+    new_rounds = []
+    exp_cache: dict = {}
+    for raw in session.get("rounds", []):
+        r = normalize_round(raw)
+        exp_id = r.get("blind_experiment_id")
+        if not exp_id:
+            new_rounds.append(r)
+            continue
+        if exp_id not in exp_cache:
+            exp_cache[exp_id] = blind_experiment.get(exp_id)
+        exp = exp_cache[exp_id]
+        revealed = bool(exp and exp.get("status") == blind_experiment.REVEALED)
+        new_responses = []
+        for resp in r.get("responses", []):
+            label = resp.get("label")
+            if label and revealed:
+                resp = {**resp, "label": f"{label} — {resp.get('name', '?')}"}
+            new_responses.append(resp)
+        new_rounds.append({**r, "responses": new_responses})
+    out["rounds"] = new_rounds
+    return out
+
+
 def export_html(session: dict) -> str:
     """A self-contained, share-anywhere HTML page of the conversation."""
+    session = _resolve_blind_labels(session)
     esc = html_lib.escape
     parts = []
     for raw in session.get("rounds", []):
@@ -266,15 +304,18 @@ def export_html(session: dict) -> str:
 
 def export_pdf(session: dict) -> bytes:
     """The conversation as a PDF file — the archive that outlives the app."""
+    session = _resolve_blind_labels(session)
     return pdf_export.export_pdf(session, normalize_round, _mode_marker)
 
 
 def export_pdf_bundle(sessions: List[dict]) -> bytes:
     """Selected sessions (or all of them) as ONE archive PDF."""
+    sessions = [_resolve_blind_labels(s) for s in sessions]
     return pdf_export.export_pdf_bundle(sessions, normalize_round, _mode_marker)
 
 
 def export_markdown(session: dict) -> str:
+    session = _resolve_blind_labels(session)
     lines = [
         f"# Team Talk — {session['id']}",
         "",
