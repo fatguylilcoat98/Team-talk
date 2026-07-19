@@ -40,9 +40,9 @@ _CLIENT = None
 # Captured from the working tree immediately before this session's changes —
 # see the commit that adds this file for the exact baseline commit.
 GOVERNANCE_HASHES = {
-    "identity_guard.py": "e8505d1c1c575f9b1a9ff4d9adc004f2eb3236f108b681d0a3f048dc779e071e",
-    "blind_experiment.py": "388ab39e8f0e346f3d4bb75adbabc9d9a2b6db78f1274f0eb88b4be97ea63560",
-    "blind_context.py": "79e0b757564178fb5fb3e378b0deb334edf3adfe49ff52f43db163407acb3be1",
+    "identity_guard.py": "7a2867e87cba7fb8ce5f5e4b21c69ace0d2dc1977c8518015e4391595914aee8",
+    "blind_experiment.py": "5d6f1d337e83a99115e4c723dd227dfe8a1db04cec08b0562d0cf4661274f6e8",
+    "blind_context.py": "0a75708c271655f851bfad093f8dcc2993b63de4083b0661d541a97d9988e5f8",
 }
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -64,8 +64,13 @@ def _cleanup():
 
 
 def _sha256(path):
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+    # Text mode + newline=None normalizes CRLF/CR/LF to "\n" (Python's
+    # universal-newlines translation) before hashing — a checkout with
+    # core.autocrlf=true (common on Windows) has CRLF on disk for a file
+    # git itself stores as LF; hashing raw bytes would flag that as
+    # "changed" when git status/diff show zero difference from HEAD.
+    with open(path, "r", encoding="utf-8", newline=None) as f:
+        return hashlib.sha256(f.read().encode("utf-8")).hexdigest()
 
 
 # --------------------------------------------------------------------------
