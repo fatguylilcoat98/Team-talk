@@ -1935,12 +1935,15 @@ const questionsList = document.getElementById('questions-list');
 const verifyList = document.getElementById('verify-list');
 const ledgerChain = document.getElementById('ledger-chain');
 const ledgerList = document.getElementById('ledger-list');
+const patternCatcherOffice = document.getElementById('pattern-catcher-office');
+const patternCatcherList = document.getElementById('pattern-catcher-list');
 
 truthBtn.addEventListener('click', async () => {
     truthOverlay.classList.remove('hidden');
     renderQuestions();
     renderVerification();
     renderLedger();
+    renderPatternCatcher();
 });
 truthClose.addEventListener('click', () => truthOverlay.classList.add('hidden'));
 truthOverlay.addEventListener('click', (e) => {
@@ -2067,6 +2070,41 @@ async function renderLedger() {
         }
     } catch (err) {
         ledgerChain.textContent = `Could not load ledger: ${err.message}`;
+    }
+}
+
+async function renderPatternCatcher() {
+    patternCatcherOffice.textContent = 'Loading…';
+    patternCatcherList.innerHTML = '';
+    try {
+        const res = await fetch('/api/pattern-catcher?limit=25');
+        const data = await res.json();
+        const occ = data.office.occupant;
+        patternCatcherOffice.textContent = occ
+            ? `Held by ${occ} · ${data.office.assignments} assignment(s) on record`
+            : 'Vacant — no seat currently holds this office';
+        patternCatcherOffice.className = `field-note ${occ ? 'v-ok' : ''}`;
+        if (!data.queries.length) {
+            patternCatcherList.innerHTML = '<p class="field-note">No LEDGER: queries issued yet.</p>';
+            return;
+        }
+        for (const q of data.queries) {
+            const line = document.createElement('div');
+            line.className = 'ledger-line';
+            if (q.refused) {
+                line.textContent = `✗ REFUSED · ${(q.ts || '').slice(0, 16)}Z · ${q.participant_id} · "${q.query}" — ${q.reason}`;
+            } else {
+                const res2 = q.result || {};
+                const ok = res2.ok !== false;
+                const summary = ok
+                    ? `${res2.returned ?? '?'} of ${res2.total ?? '?'} matched${res2.truncated ? ', truncated' : ''}${res2.incomplete && res2.incomplete.length ? ', partial' : ''}`
+                    : `malformed query: ${(res2.errors || []).join('; ')}`;
+                line.textContent = `${ok ? '✓' : '✗'} ${(q.ts || '').slice(0, 16)}Z · ${q.participant_id} · "${q.query}" — ${summary}`;
+            }
+            patternCatcherList.appendChild(line);
+        }
+    } catch (err) {
+        patternCatcherOffice.textContent = `Could not load Pattern Catcher audit: ${err.message}`;
     }
 }
 
