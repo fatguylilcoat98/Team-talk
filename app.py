@@ -13,7 +13,7 @@ import json
 import os
 import re
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -29,6 +29,8 @@ from pydantic import BaseModel
 
 import about_store
 import api_client
+import blind_context
+import blind_experiment
 import brain
 import choice_store
 import code_access
@@ -40,6 +42,7 @@ import file_store
 import game_master
 import game_store
 import history_store
+import identity_guard
 import journal_store
 import ledger
 import mailbox_store
@@ -48,6 +51,8 @@ import mission_store
 import mode_shift
 import night_shift
 import notebook_store
+import office_store
+import pattern_catcher
 import proposal_store
 import questions_store
 import studio_store
@@ -63,7 +68,7 @@ import wall_store
 import workshop_engine
 import workshop_reasoning
 import workshop_store
-from conversation import (MODES, SHORT_TERM_ROUNDS, blind_labels, build_context,
+from conversation import (MODES, SHORT_TERM_ROUNDS, build_context,
                           lounge_system_prompt,
                           normalize_modes, role_notes, system_prompt)
 
@@ -502,10 +507,56 @@ async def _chat_impl(request: ChatRequest):
         raise HTTPException(status_code=400,
                             detail="Every seat is resting — wake at least one in Settings.")
 
-    # Blind mode: names, personas, roles, and awards are all stripped — the
-    # AIs see (and are) anonymous "Voice N" labels, stable within a session.
+    # Blind mode: a sealed, experiment-scoped anonymous window. "Voice N"
+    # cosmetic labels alone are not enough — the room's own history still
+    # names names — so the context shown to a blind turn is SCOPED to this
+    # experiment's own rounds only (blind_context.py), the sealed mapping
+    # never leaves blind_experiment.py before a manual reveal, and every
+    # fully constructed prompt is audited before anything is sent
+    # (identity_guard.py). Any of the three failing refuses the round rather
+    # than running it. Normal mode never enters this branch.
     blind = "blind" in modes
-    labels = blind_labels(participants, session["id"]) if blind else {}
+    blind_exp: Optional[dict] = None
+    labels: Dict[str, str] = {}
+    ctx_rounds = history
+    if blind:
+        blind_exp = blind_experiment.active_for_session(session["id"])
+        if blind_exp is None:
+            opened = blind_experiment.open_experiment(
+                session["id"], participants, by=author_name or "chris")
+            # open_experiment() returns public_view() (no mapping/participant_ids
+            # — it must not, since that view is what a UI/export may also see).
+            # Re-fetch the full internal record, the same shape active_for_session
+            # returns, so every use below sees a consistent shape either way.
+            blind_exp = blind_experiment.get(opened["experiment_id"])
+        # A participant not covered by the sealed mapping (joined, or came
+        # off rest, after the experiment opened) cannot be shown blind — fail
+        # closed rather than let a newcomer's real name through by omission.
+        sealed_ids = set(blind_exp.get("participant_ids") or [])
+        unmapped = [p["id"] for p in participants if p["id"] not in sealed_ids]
+        if unmapped:
+            ledger.append("system", "blind_turn_failed_closed",
+                          ref=blind_exp["experiment_id"],
+                          detail={"stage": "roster_mismatch", "unmapped": unmapped})
+            raise HTTPException(status_code=409, detail=(
+                f"Blind round refused: {len(unmapped)} participant(s) in the "
+                "current roster are not covered by this experiment's sealed "
+                "mapping. Close this blind experiment and open a fresh one for "
+                "the current roster. Nothing was sent to anyone."))
+        bt = blind_context.prepare_blind_turn(history, blind_exp, participants)
+        if not bt["safe_to_run"]:
+            ledger.append("system", "blind_turn_failed_closed",
+                          ref=blind_exp["experiment_id"],
+                          detail={"stage": "scoped_history_audit",
+                                  "residual_count": len(bt["residual_identity"])})
+            raise HTTPException(status_code=409, detail=(
+                f"Blind round refused: {len(bt['residual_identity'])} identity "
+                "reference(s) survive in the scoped conversation window. "
+                "Nothing was sent to any participant; the stored record is "
+                "unchanged."))
+        ctx_rounds = bt["history"]
+        labels = {p["id"]: blind_experiment.label_for(blind_exp["experiment_id"], p["id"])
+                  for p in participants}
     display = {p["id"]: (labels.get(p["id"]) or p["name"]) for p in participants}
     notes = {} if blind else role_notes(modes, participants, session["id"])
 
@@ -527,17 +578,25 @@ async def _chat_impl(request: ChatRequest):
         # ✏️ The Scratchpad: this seat's private, disappearing pad. Aging
         # happens here (one turn burned per delivery), so build it once/turn.
         scratch_blk = scratch_store.boot_block(p["id"])
+        # 🔎 Pattern Catcher: non-empty only for whoever currently holds the
+        # office (office_store.holds) — the office owns the capability, not
+        # whichever model happens to be sitting in it. Works in every mode.
+        pattern_blk = pattern_catcher.boot_block(p["id"])
         mem = memory_block
-        for blk in (scratch_blk, choice_blk, code_files, mailbox, receipts, private):
+        for blk in (scratch_blk, choice_blk, code_files, mailbox, receipts, private, pattern_blk):
             if blk:
                 mem = f"{blk}\n\n{mem}" if mem else blk
         return (
             system_prompt(me, others, modes,
                           persona=None if blind else p.get("persona"),
                           role_note=notes.get(p["id"]), awards=awards),
-            build_context(history, message, me, others, modes, so_far,
+            build_context(ctx_rounds, message, me, others, modes, so_far,
                           memory_block=mem, attachments_block=attachments_block,
-                          episodes_block=episodes_block, via_splendor=via_splendor,
+                          # Cross-round episode summaries can carry real names
+                          # from rounds outside the blind window — out of scope
+                          # for the same reason raw history is (blind_context.py).
+                          episodes_block=("" if blind else episodes_block),
+                          via_splendor=via_splendor,
                           room_context=rc, author_name=author_name, relay_name=relay_name),
         )
 
@@ -559,9 +618,36 @@ async def _chat_impl(request: ChatRequest):
         text, _ = scratch_store.extract(text)
         text, _, _ = seat_moves.extract(text)
         text, _ = mode_shift.extract(text)
+        text, _ = pattern_catcher.extract(text)
         text = room_actions._ACTION_LINE.sub("", text).strip()
         text = _strip_orchestration_scaffolding(text)
         return text
+
+    def _blind_audit_or_raise(p, system, ctx):
+        """Last-mile check on the FULLY assembled prompt: does it name anyone
+        other than its own recipient? Any leak refuses the WHOLE round —
+        nothing is sent to anyone, and nothing partial is ever saved."""
+        audit = identity_guard.audit_prompt(f"{system}\n\n{ctx}", participants, p["id"])
+        if not audit["clean"]:
+            ledger.append("system", "blind_turn_failed_closed",
+                          ref=blind_exp["experiment_id"],
+                          detail={"stage": "outbound_prompt_audit", "recipient": p["id"],
+                                  "leak_count": len(audit["leaks"])})
+            raise HTTPException(status_code=409, detail=(
+                "Blind round refused: the constructed prompt for one seat named "
+                f"another participant ({len(audit['leaks'])} leak(s)). Nothing "
+                "was sent to any participant."))
+
+    def _blind_guard_reply(p, result):
+        """Inbound guard: strip a self-identifying HEADER; identity left in
+        substantive prose compromises the experiment instead of being
+        silently edited — see identity_guard.py for why."""
+        guarded = identity_guard.guard_response(
+            result.get("text", ""), me_id=p["id"], participants=participants)
+        if guarded["compromised"]:
+            blind_experiment.mark_compromised(
+                blind_exp["experiment_id"], guarded["leaks"], by=p["id"])
+        return {**result, "text": guarded["text"]}
 
     responses = []
     if turn_style == "sequential":
@@ -571,19 +657,30 @@ async def _chat_impl(request: ChatRequest):
         so_far = []
         for p in order:
             system, ctx = prompt_for(p, so_far)
+            if blind:
+                _blind_audit_or_raise(p, system, ctx)
             result = await api_client.call_participant(
                 p, system, ctx, images=images, context="chat", session_id=session["id"])
+            if blind:
+                result = _blind_guard_reply(p, result)
             if result["ok"]:
                 so_far.append({"name": display[p["id"]], "text": _strip_markers(result["text"])})
             responses.append(_response_entry(p, result, labels.get(p["id"])))
     else:
         # The core requirement: every AI is called at the same time
         prompts = [prompt_for(p) for p in participants]
+        if blind:
+            # Audit EVERY prompt before calling ANY participant — a blind
+            # round in parallel mode goes out whole or not at all.
+            for p, (system, ctx) in zip(participants, prompts):
+                _blind_audit_or_raise(p, system, ctx)
         results = await asyncio.gather(
             *[api_client.call_participant(p, s, c, images=images, context="chat",
                                           session_id=session["id"])
               for p, (s, c) in zip(participants, prompts)]
         )
+        if blind:
+            results = [_blind_guard_reply(p, r) for p, r in zip(participants, results)]
         responses = [_response_entry(p, r, labels.get(p["id"]))
                      for p, r in zip(participants, results)]
 
@@ -767,6 +864,24 @@ async def _chat_impl(request: ChatRequest):
                                          "reason": "not on the CODE INDEX"})
             if granted:
                 r["code_requested"] = granted
+        # 🔎 PATTERN CATCHER: LEDGER: <query> triggers a read-only search of
+        # the room's own record, staged for delivery on the office holder's
+        # NEXT turn — same convention as mail and receipts. A query from a
+        # seat that doesn't currently hold the office is refused, not run.
+        cleaned, ledger_queries = pattern_catcher.extract(r["text"])
+        if ledger_queries or cleaned != r["text"]:
+            r["text"] = cleaned
+            for q in ledger_queries:
+                item = pattern_catcher.issue_query(r["id"], q, session["id"])
+                if item.get("refused"):
+                    receipt_store.issue(r["id"], "ledger_query", "rejected",
+                                        {"reason": item["reason"]})
+                else:
+                    qres = item.get("result") or {}
+                    receipt_store.issue(r["id"], "ledger_query", "success",
+                                        {"query": q[:80], "returned": qres.get("returned"),
+                                         "total": qres.get("total")})
+            r["ledger_queried"] = len(ledger_queries)
         # 📥 PROPOSAL: sealed submission. The marker is stripped BEFORE the
         # record — anonymity starts here. The ledger event carries only the
         # commitment (never the author); the receipt goes to the seat
@@ -885,6 +1000,10 @@ async def _chat_impl(request: ChatRequest):
         # few rounds, but it must NEVER be compressed into cross-session
         # episodic memory (episode_store.pending_chunk drops these).
         **({"ghost_fork": True} if ghost_fork else {}),
+        # Reveal-aware exports (pdf/html/markdown) key off this to resolve
+        # "Voice N" back to a real name ONLY once this experiment is
+        # manually revealed — see session_manager._resolve_blind_labels.
+        **({"blind_experiment_id": blind_exp["experiment_id"]} if blind_exp else {}),
         "responses": responses,
     }
 
@@ -900,6 +1019,12 @@ async def _chat_impl(request: ChatRequest):
     # Persist immediately so no round is ever lost
     session["rounds"].append(round_data)
     await session_manager.save_session(session)
+
+    # This round now belongs to the blind experiment's scope — every LATER
+    # turn's context window includes it (relabelled); everything before it
+    # stays out of scope, untouched, exactly as opened.
+    if blind_exp:
+        blind_experiment.record_round(blind_exp["experiment_id"], session["id"], round_number)
 
     # 🃏 The Choice countdown: one Living Room round just completed. On
     # expiry the temporary archive (and every derived artifact) is deleted
@@ -1473,6 +1598,37 @@ async def get_ledger(actor: Optional[str] = None, action: Optional[str] = None,
                      limit: int = 100):
     return {"chain": ledger.verify_chain(),
             "events": ledger.list_events(actor=actor, action=action, limit=limit)}
+
+
+@app.get("/api/blind/{session_id}")
+async def blind_status(session_id: str):
+    """Public (never-sealed) view of this session's active blind experiment,
+    if any: status, rounds covered, compromise flags — and, only once
+    manually revealed, the mapping itself."""
+    exp = blind_experiment.active_for_session(session_id)
+    if not exp:
+        return {"active": False}
+    return {"active": True, **blind_experiment.public_view(exp["experiment_id"])}
+
+
+@app.post("/api/blind/{session_id}/reveal")
+async def blind_reveal(session_id: str):
+    """Manual reveal — the one act nothing in blind_experiment.py performs
+    on its own. Every other transition (open, round, compromise) is
+    automatic; this one requires an explicit call, by design."""
+    exp = blind_experiment.active_for_session(session_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="No blind experiment for this session")
+    return blind_experiment.reveal(exp["experiment_id"], by="chris")
+
+
+@app.get("/api/pattern-catcher")
+async def pattern_catcher_audit(participant: Optional[str] = None, limit: int = 50):
+    """Audit surface for the Pattern Catcher: which office holder received
+    the capability, what query each one issued, and a summary of the ledger
+    evidence returned (or the reason it was refused)."""
+    return {"office": office_store.describe(office_store.PATTERN_CATCHER),
+            "queries": pattern_catcher.recent(participant, limit)}
 
 
 class AnswerBody(BaseModel):
