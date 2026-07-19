@@ -45,7 +45,8 @@ PALETTE = [
 
 MAX_PARTICIPANTS = 6
 
-PARTICIPANT_FIELDS = {"id", "name", "provider", "model", "api_key", "base_url", "color", "persona"}
+PARTICIPANT_FIELDS = {"id", "name", "provider", "model", "api_key", "base_url", "color", "persona",
+                      "resting", "max_tokens"}
 PROVIDERS = {"anthropic", "openai"}
 
 
