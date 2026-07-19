@@ -74,6 +74,15 @@ ACTIONS = {
     "surfacer_source", "surfacer_challenge",
     # 🧩 the reasoning graph — Layer 0 Claims and Participations (append-only)
     "claim_created", "participation_appended",
+    # 🏛️ offices — standing seats that outlive whoever occupies them
+    "office_assigned", "office_vacated",
+    # 🕶️ blind experiments — sealed mapping lifecycle (never the mapping itself)
+    "blind_experiment_opened", "blind_experiment_revealed",
+    "blind_experiment_compromised", "blind_experiment_closed",
+    "blind_turn_failed_closed",
+    # 🔎 the Pattern Catcher — read-only ledger queries, and refusals when the
+    # capability is asked for by a seat that doesn't currently hold the office
+    "ledger_query_issued", "ledger_query_refused",
 }
 
 
