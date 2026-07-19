@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -376,6 +377,103 @@ async def _lounge_turn(session: dict, message: str, turn_style: str,
     return {"session_id": session["id"], "status": status, "lounge": True, **round_data}
 
 
+# --- Blind-mode delivery-state protection -----------------------------------
+# Building a candidate prompt calls the same boot_block() functions normal
+# mode does — mailbox/receipts/scratch/code-requests/pattern-catcher mark
+# their pending items delivered, and Choice pops its per-seat queue, AS A
+# SIDE EFFECT of constructing the text, before the outbound audit ever runs.
+# A candidate that fails the audit is never sent — but without this, its
+# boot-block side effects had already fired, so a failed-closed round could
+# silently consume one-time material nobody ever actually saw.
+#
+# The fix is a snapshot/restore around the audited stage, not a rewrite of
+# any store's delivery logic: take a byte-exact snapshot of every file a
+# boot_block() call can mutate, let prompt construction run exactly as it
+# always has, and if the audit finds a leak, restore the snapshot before
+# raising — undoing the mutation instead of preventing it. On success the
+# snapshot is simply discarded; whatever was marked delivered stays delivered,
+# exactly once. This keeps identity_guard.py / blind_experiment.py /
+# blind_context.py untouched and every store's own mutation code untouched —
+# nothing here duplicates or re-derives their logic.
+
+_BLIND_SNAPSHOT_DIRTREE = "__dirtree__"
+
+
+def _snapshot_file(path: str):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _restore_file(path: str, content) -> None:
+    if content is None:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(content)
+
+
+def _snapshot_dir(root: str):
+    if not os.path.isdir(root):
+        return None
+    out = {}
+    for dirpath, _dirs, filenames in os.walk(root):
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            out[os.path.relpath(full, root)] = _snapshot_file(full)
+    return out
+
+
+def _restore_dir(root: str, snapshot) -> None:
+    if snapshot is None:
+        shutil.rmtree(root, ignore_errors=True)
+        return
+    current = set()
+    if os.path.isdir(root):
+        for dirpath, _dirs, filenames in os.walk(root):
+            for fn in filenames:
+                full = os.path.join(dirpath, fn)
+                current.add(os.path.relpath(full, root))
+    for rel in current - set(snapshot.keys()):
+        try:
+            os.remove(os.path.join(root, rel))
+        except OSError:
+            pass
+    for rel, content in snapshot.items():
+        _restore_file(os.path.join(root, rel), content)
+
+
+def _blind_snapshot() -> dict:
+    """Byte-exact snapshot of every one-time-delivery store a candidate
+    blind prompt's boot blocks can mutate. Journal is excluded — it is a
+    persistent record always shown in full, never a one-time delivery."""
+    return {
+        mailbox_store.MAILBOX_PATH: _snapshot_file(mailbox_store.MAILBOX_PATH),
+        receipt_store.RECEIPTS_PATH: _snapshot_file(receipt_store.RECEIPTS_PATH),
+        scratch_store.SCRATCH_PATH: _snapshot_file(scratch_store.SCRATCH_PATH),
+        code_access.PENDING_PATH: _snapshot_file(code_access.PENDING_PATH),
+        pattern_catcher.QUERIES_PATH: _snapshot_file(pattern_catcher.QUERIES_PATH),
+        _BLIND_SNAPSHOT_DIRTREE: _snapshot_dir(choice_store.CHOICE_DIR),
+    }
+
+
+def _blind_restore(snapshot: dict) -> None:
+    """Undo exactly what building the candidate prompt(s) mutated. Called
+    only on a failed audit — a passed audit leaves the snapshot unused and
+    every delivery mark made stands, committed exactly once."""
+    for path, content in snapshot.items():
+        if path == _BLIND_SNAPSHOT_DIRTREE:
+            _restore_dir(choice_store.CHOICE_DIR, content)
+        else:
+            _restore_file(path, content)
+
+
 async def _chat_impl(request: ChatRequest):
     message = request.message.strip()
     if not message:
@@ -418,6 +516,10 @@ async def _chat_impl(request: ChatRequest):
                       detail={k: applied["record"][k] for k in ("status", "reason", "round")})
         if applied.get("modes"):
             modes = normalize_modes(applied["modes"]) or modes
+
+    # Computed here (once modes are final, post-SHIFT-TO) because the shared
+    # room-wide context assembly below needs to know before it runs.
+    blind = "blind" in modes
 
     # Attachments: images go to the APIs natively; text/PDF content is
     # inlined into the round's context
@@ -491,6 +593,23 @@ async def _chat_impl(request: ChatRequest):
         _shift_lines = "\n".join(mode_shift.record_line(x) for x in shift_notices)
         memory_block = f"{_shift_lines}\n\n{memory_block}" if memory_block else _shift_lines
 
+    if blind:
+        # Scope out — never redact — every shared, room-wide attributed
+        # source for a blind window: long-term memory (each line carries a
+        # real "by"), cross-session episode summaries, notebook/wall/
+        # questions/workshop/proposals/studio/missions/CRT/code-index/room-
+        # sense, and any mode-shift announcement. None of this was ever
+        # scoped for blind mode — it predates blind_context.py entirely —
+        # and confirmed leaks were traced to exactly these sources on
+        # production (notebook/questions/studio/CRT all named another seat).
+        # Same principle blind_context.py already applies to conversation
+        # history: out of scope, not rewritten. The stored records — every
+        # memory, notebook entry, CRT pin — are completely untouched; only
+        # what THIS window can see is narrowed. Per-seat private boot blocks
+        # (journal/mailbox/receipts/choice/scratch/pattern-catcher) are a
+        # separate surface, already covered by the outbound prompt audit.
+        memory_block = ""
+
     # Canonical room context: one device-verified time & place for everyone.
     # A change of place (vs the previous round) is itself a ledgered event.
     rc = request.room_context.clean() if request.room_context else None
@@ -514,8 +633,8 @@ async def _chat_impl(request: ChatRequest):
     # never leaves blind_experiment.py before a manual reveal, and every
     # fully constructed prompt is audited before anything is sent
     # (identity_guard.py). Any of the three failing refuses the round rather
-    # than running it. Normal mode never enters this branch.
-    blind = "blind" in modes
+    # than running it. Normal mode never enters this branch. (`blind` itself
+    # was already computed above, before the room-wide context assembly.)
     blind_exp: Optional[dict] = None
     labels: Dict[str, str] = {}
     ctx_rounds = history
@@ -623,12 +742,15 @@ async def _chat_impl(request: ChatRequest):
         text = _strip_orchestration_scaffolding(text)
         return text
 
-    def _blind_audit_or_raise(p, system, ctx):
+    def _blind_audit_or_raise(p, system, ctx, snapshot):
         """Last-mile check on the FULLY assembled prompt: does it name anyone
-        other than its own recipient? Any leak refuses the WHOLE round —
-        nothing is sent to anyone, and nothing partial is ever saved."""
+        other than its own recipient? Any leak restores `snapshot` (undoing
+        whatever building this candidate prompt marked delivered) and
+        refuses the WHOLE round — nothing is sent to anyone, nothing
+        partial is ever saved, and nothing one-time is silently consumed."""
         audit = identity_guard.audit_prompt(f"{system}\n\n{ctx}", participants, p["id"])
         if not audit["clean"]:
+            _blind_restore(snapshot)
             ledger.append("system", "blind_turn_failed_closed",
                           ref=blind_exp["experiment_id"],
                           detail={"stage": "outbound_prompt_audit", "recipient": p["id"],
@@ -636,7 +758,8 @@ async def _chat_impl(request: ChatRequest):
             raise HTTPException(status_code=409, detail=(
                 "Blind round refused: the constructed prompt for one seat named "
                 f"another participant ({len(audit['leaks'])} leak(s)). Nothing "
-                "was sent to any participant."))
+                "was sent to any participant, and no mail, receipt, or other "
+                "one-time material was consumed."))
 
     def _blind_guard_reply(p, result):
         """Inbound guard: strip a self-identifying HEADER; identity left in
@@ -656,9 +779,14 @@ async def _chat_impl(request: ChatRequest):
         order = participants[rot:] + participants[:rot]
         so_far = []
         for p in order:
+            # Snapshotted per participant: an earlier seat in this round
+            # that already passed audit and was sent keeps its committed
+            # delivery state — only THIS candidate's own mutation, if any,
+            # is ever rolled back.
+            snap = _blind_snapshot() if blind else None
             system, ctx = prompt_for(p, so_far)
             if blind:
-                _blind_audit_or_raise(p, system, ctx)
+                _blind_audit_or_raise(p, system, ctx, snap)
             result = await api_client.call_participant(
                 p, system, ctx, images=images, context="chat", session_id=session["id"])
             if blind:
@@ -668,12 +796,15 @@ async def _chat_impl(request: ChatRequest):
             responses.append(_response_entry(p, result, labels.get(p["id"])))
     else:
         # The core requirement: every AI is called at the same time
+        snap = _blind_snapshot() if blind else None
         prompts = [prompt_for(p) for p in participants]
         if blind:
             # Audit EVERY prompt before calling ANY participant — a blind
-            # round in parallel mode goes out whole or not at all.
+            # round in parallel mode goes out whole or not at all. One
+            # snapshot covers every seat's prompt, since all were built
+            # before any of them is known to be clean.
             for p, (system, ctx) in zip(participants, prompts):
-                _blind_audit_or_raise(p, system, ctx)
+                _blind_audit_or_raise(p, system, ctx, snap)
         results = await asyncio.gather(
             *[api_client.call_participant(p, s, c, images=images, context="chat",
                                           session_id=session["id"])
